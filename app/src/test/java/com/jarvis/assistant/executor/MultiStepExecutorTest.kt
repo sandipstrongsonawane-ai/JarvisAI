@@ -1,5 +1,7 @@
 package com.jarvis.assistant.executor
 
+import com.jarvis.assistant.ai.JarvisLlmClient
+
 import android.content.ContextWrapper
 import com.jarvis.assistant.model.AssistantCommand
 import org.junit.Assert.assertEquals
