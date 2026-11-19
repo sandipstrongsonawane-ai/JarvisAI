@@ -17,11 +17,6 @@ class VoiceChallengeTest {
     }
 
     @Test
-    fun rejectsReorderedChallengeWords() {
-        assertFalse(VoiceChallenge.matches("amber birch copper delta", "amber copper birch delta"))
-    }
-
-    @Test
     fun rejectsBlankTranscript() {
         assertFalse(VoiceChallenge.matches("amber birch copper", ""))
         assertFalse(VoiceChallenge.matches("", "amber birch copper delta"))

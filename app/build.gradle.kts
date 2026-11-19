@@ -162,11 +162,6 @@ val downloadSpeakerModel by tasks.registering {
     }
 }
 
-tasks.named("preBuild").configure {
-    dependsOn(downloadSpeakerModel)
-    dependsOn(downloadVoiceChallengeAsrModel)
-}
-
 // Pinned offline English ASR model used only for the one-use voice-auth challenge.
 // The int8 encoder is ~43 MB; the model is verified before extraction and never
 // downloaded at runtime. The model is Apache-2.0 licensed.
@@ -245,5 +240,10 @@ val downloadVoiceChallengeAsrModel by tasks.registering {
             }
         }
     }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(downloadSpeakerModel)
+    dependsOn(downloadVoiceChallengeAsrModel)
 }
 
