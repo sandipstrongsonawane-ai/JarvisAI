@@ -279,8 +279,14 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onResume() {
-        com.jarvis.assistant.ui.HudController.addListener(this)
         super.onResume()
+        com.jarvis.assistant.ui.HudController.addListener(this)
+        // Attach the optional companion only after the launcher activity is foregrounded.
+        try {
+            com.jarvis.assistant.ui.PuppyOverlay.show(applicationContext)
+        } catch (_: Exception) {
+            // A companion overlay must never prevent the main assistant from opening.
+        }
         if (::settings.isInitialized) scheduleFeedbackPromptCheck()
     }
 
