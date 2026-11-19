@@ -8,6 +8,7 @@ import android.content.Context
 class SettingsManager(context: Context) {
 
     private val prefs = context.getSharedPreferences("jarvis_settings", Context.MODE_PRIVATE)
+    private val secureApiKeys = SecureApiKeyStore(context)
 
     // Voice
     fun getVoiceSpeed(): Float = prefs.getFloat("voice_speed", 1.0f)
@@ -58,7 +59,12 @@ class SettingsManager(context: Context) {
     fun getUseShortAnswers(): Boolean = prefs.getBoolean("short_answers", false)
     fun setUseShortAnswers(use: Boolean) = prefs.edit().putBoolean("short_answers", use).apply()
 
-    fun clear() = prefs.edit().clear().apply()
+    fun getGroqApiKey(): String = secureApiKeys.get("groq") ?: ""
+    fun setGroqApiKey(value: String) = secureApiKeys.put("groq", value)
+    fun getGeminiApiKey(): String = secureApiKeys.get("gemini") ?: ""
+    fun setGeminiApiKey(value: String) = secureApiKeys.put("gemini", value)
+
+    fun clear() { prefs.edit().clear().apply(); secureApiKeys.clear() }
 
     fun getFirstLaunchTime(): Long {
         val t = prefs.getLong("first_launch_time", 0L)
