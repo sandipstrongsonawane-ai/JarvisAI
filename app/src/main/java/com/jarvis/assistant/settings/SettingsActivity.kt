@@ -515,26 +515,35 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Enrolling — say a short phrase 3 times when prompted.")
+        toast("Voice enrollment starting. Keep the phone near you and use the same phrase for all three samples.")
         scope.launch {
             val samples = mutableListOf<ShortArray>()
-            repeat(3) { i ->
-                toast("Sample ${i + 1} of 3 — speak now…")
-                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(1800) }
-                if (sample != null) samples.add(sample)
-            }
-            if (samples.size < 2) {
-                toast("Didn't capture enough audio — try again somewhere quieter.")
-                return@launch
+            val prompts = listOf("First sample. Say your chosen phrase now.",
+                "Second sample. Repeat the same phrase.",
+                "Final sample. Repeat the same phrase once more.")
+            for (i in prompts.indices) {
+                tts.speak(prompts[i])
+                // Give the spoken prompt time to finish before opening the recorder.
+                kotlinx.coroutines.delay(2200L)
+                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2200) }
+                if (sample == null) {
+                    toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
+                    tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
+                    return@launch
+                }
+                samples += sample
+                kotlinx.coroutines.delay(500L)
             }
             val enrolled = voiceAuth.enrollFromSamples(samples)
             if (!enrolled) {
                 toast("Neural voice enrollment failed. Please retry in a quiet place.")
+                tts.speak("Voice enrollment failed. Please try again.")
                 return@launch
             }
             voiceAuth.setEnabled(true)
             voiceAuthStatus.text = voiceAuthStatusText()
             toast("Neural voice enrolled and voice lock enabled.")
+            tts.speak("Voice enrollment complete. Voice lock is now enabled.")
         }
     }
 
