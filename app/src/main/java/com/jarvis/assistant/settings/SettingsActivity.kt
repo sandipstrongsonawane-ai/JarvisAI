@@ -527,10 +527,14 @@ class SettingsActivity : AppCompatActivity() {
                 toast("Didn't capture enough audio — try again somewhere quieter.")
                 return@launch
             }
-            voiceAuth.enrollFromSamples(samples)
+            val enrolled = voiceAuth.enrollFromSamples(samples)
+            if (!enrolled) {
+                toast("Neural voice enrollment failed. Please retry in a quiet place.")
+                return@launch
+            }
             voiceAuth.setEnabled(true)
             voiceAuthStatus.text = voiceAuthStatusText()
-            toast("Voice enrolled and voice lock enabled.")
+            toast("Neural voice enrolled and voice lock enabled.")
         }
     }
 
