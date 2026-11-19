@@ -24,19 +24,14 @@ class CommandExecutor(private val context: Context) {
     private val lockManager = AppLockManager(context)
 
     fun execute(cmd: AssistantCommand): String {
-        // Stark L6 — confirm gate
-        try {
-            val held = com.jarvis.assistant.executor.RiskConfirmGate.takeIfConfirm(
-                listOfNotNull(cmd.message, cmd.target, cmd.action).joinToString(" ")
-            )
-            // actual confirm speech is handled in service; here gate risky new commands
-        } catch (_: Exception) {}
+        // Confirmation is resolved centrally by AssistantForegroundService before execution.
         if (!riskBypass && com.jarvis.assistant.executor.RiskConfirmGate.isRisky(cmd)) {
             try { com.jarvis.assistant.ui.HudController.thinking() } catch (_: Exception) {}
             return com.jarvis.assistant.executor.RiskConfirmGate.hold(cmd)
         }
 
-        return when (ActionType.fromKey(cmd.action)) {
+        return try {
+            when (ActionType.fromKey(cmd.action)) {
             ActionType.OPEN_APP -> openApp(cmd.target)
             ActionType.CLOSE_APP -> closeApp(cmd.target)
             ActionType.CLEAR_RECENTS -> clearRecents()
@@ -110,6 +105,12 @@ class CommandExecutor(private val context: Context) {
             ActionType.REPLY -> cmd.message ?: ""
             ActionType.PC_CONNECT -> "PC connect is handled by the assistant service, not here."
             ActionType.UNKNOWN -> "I didn't understand that command."
+            }
+        } catch (e: SecurityException) {
+            "Permission required for this action. No action was completed."
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisCommandExecutor", "Action ${cmd.action} failed", e)
+            "Action failed: ${e.message ?: "unknown error"}. It was not confirmed as complete."
         }
     }
 
@@ -937,20 +938,9 @@ private fun setAlarm(target: String?): String {
     private fun executeMultiStep(cmd: AssistantCommand): String {
         try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
         val steps = cmd.steps
-        if (steps.isNullOrEmpty()) {
-            return cmd.message?.takeIf { it.isNotBlank() } ?: "No steps to execute."
-        }
-        val out = mutableListOf<String>()
-        for (step in steps) {
-            try {
-                val r = execute(step)
-                if (r.isNotBlank()) out.add(r)
-            } catch (e: Exception) {
-                out.add("Step failed: ${e.message}")
-                break
-            }
-        }
-        return out.joinToString(" ").ifBlank { "Done." }
+        if (steps.isNullOrEmpty()) return "No steps to execute."
+        val report = MultiStepExecutor(context) { step -> execute(step) }.execute(steps)
+        return report.summary
     }
 
 
