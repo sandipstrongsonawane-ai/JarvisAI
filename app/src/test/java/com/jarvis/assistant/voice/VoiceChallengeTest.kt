@@ -7,18 +7,18 @@ import org.junit.Test
 class VoiceChallengeTest {
     @Test
     fun acceptsExactPhraseIgnoringCaseAndPunctuation() {
-        assertTrue(VoiceChallenge.matches("amber birch copper", "Amber, birch! copper."))
+        assertTrue(VoiceChallenge.matches("amber birch copper delta", "Amber, birch! copper delta."))
     }
 
     @Test
     fun rejectsWrongOrExtraWords() {
-        assertFalse(VoiceChallenge.matches("amber birch copper", "amber birch silver"))
-        assertFalse(VoiceChallenge.matches("amber birch copper", "amber birch copper please"))
+        assertFalse(VoiceChallenge.matches("amber birch copper delta", "amber birch silver delta"))
+        assertFalse(VoiceChallenge.matches("amber birch copper delta", "amber birch copper delta please"))
     }
 
     @Test
     fun rejectsBlankTranscript() {
         assertFalse(VoiceChallenge.matches("amber birch copper", ""))
-        assertFalse(VoiceChallenge.matches("", "amber birch copper"))
+        assertFalse(VoiceChallenge.matches("", "amber birch copper delta"))
     }
 }
