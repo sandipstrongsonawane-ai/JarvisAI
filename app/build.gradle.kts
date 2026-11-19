@@ -29,6 +29,11 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // This APK targets the user's ARM64 Android phone; avoid bundling unused ABIs.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         // Gemini / OpenWeather / Groq / Picovoice / ElevenLabs (human TTS)
         // Set in local.properties OR export as env vars / GitHub Actions secrets
         buildConfigField("String", "GEMINI_API_KEY", "\"${apiKey("GEMINI_API_KEY")}\"")
@@ -60,6 +65,10 @@ android {
             // sherpa-onnx and the existing wake-word stack both bundle ONNX Runtime.
             // Keep one shared runtime copy in the APK instead of failing native merge.
             pickFirsts += "**/libonnxruntime.so"
+        }
+        resources {
+            // The sherpa AAR also ships desktop ONNX runtimes; Android never loads these.
+            excludes += "sherpa-onnx/native/**"
         }
     }
 
