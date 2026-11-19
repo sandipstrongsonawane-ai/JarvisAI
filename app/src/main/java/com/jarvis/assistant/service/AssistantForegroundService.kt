@@ -533,6 +533,20 @@ class AssistantForegroundService : Service() {
     }
 
 
+    private fun executeAssistantCommand(
+        command: com.jarvis.assistant.model.AssistantCommand,
+        confirmed: Boolean = false
+    ): String {
+        if (command.action == "pc_connect") {
+            return when (command.target?.trim()?.lowercase()) {
+                "on", "start", "enable", "connect" -> pcBridge.start()
+                "off", "stop", "disable", "disconnect" -> pcBridge.stop()
+                else -> "Say connect PC or disconnect PC."
+            }
+        }
+        return if (confirmed) executor.executeConfirmed(command) else executor.execute(command)
+    }
+
     private suspend fun processSpeech(speech: String): Pair<String, Boolean> {
 
         // Handle explicit confirmation before OfflineBrain or any cloud model can consume it.
@@ -546,7 +560,7 @@ class AssistantForegroundService : Service() {
                     val pending = RiskConfirmGate.takeIfConfirm(speech)
                     if (pending != null) {
                         return try {
-                            executor.executeConfirmed(pending) to false
+                            executeAssistantCommand(pending, confirmed = true) to false
                         } catch (e: Exception) {
                             "The confirmed action failed: ${e.message ?: "unknown error"}" to false
                         }
@@ -617,7 +631,7 @@ class AssistantForegroundService : Service() {
             if (groqCommand != null) {
                 try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
                 try {
-                    executor.execute(groqCommand) to true
+                    executeAssistantCommand(groqCommand) to true
                 } catch (e: Exception) {
                     android.util.Log.e("JarvisService", "Groq action execution failed", e)
                     "The requested action could not be executed: ${e.message ?: "unknown error"}" to true
@@ -627,7 +641,7 @@ class AssistantForegroundService : Service() {
                     // Gemini is the structured-command fallback, using the same executor.
                     val command = gemini.getCommand(speech)
                     try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
-                    executor.execute(command) to true
+                    executeAssistantCommand(command) to true
                 } catch (e: Exception) {
                     android.util.Log.e("JarvisService", "Both cloud command planners failed", e)
                     "I couldn't interpret or execute that request. Please try a clearer command." to true
