@@ -55,6 +55,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    packaging {
+        jniLibs {
+            // sherpa-onnx and the existing wake-word stack both bundle ONNX Runtime.
+            // Keep one shared runtime copy in the APK instead of failing native merge.
+            pickFirsts += "**/libonnxruntime.so"
+        }
+    }
+
     buildFeatures {
         viewBinding = true
         buildConfig = true
