@@ -551,38 +551,31 @@ class AssistantForegroundService : Service() {
     }
 
     /**
-     * Every command entry (voice, typed chat, and PC bridge) passes this gate when voice
-     * lock is enabled. The fresh phrase is checked by STT, then a separate utterance is
-     * checked by the local neural speaker model. This is a basic replay deterrent, not
-     * liveness proof against live relays or generated speech.
+     * Voice lock verifies phrase and speaker from the exact same PCM capture.
+     * This prevents mixing a spoken challenge from one person with a replayed
+     * enrolled-speaker sample from another. It is not a full anti-spoof/liveness proof.
      */
     private suspend fun authenticateVoiceForCommand(): Boolean {
         if (!voiceAuth.isEnabled()) return true
         if (!voiceAuth.isEnrolled()) return false
 
         val phrase = com.jarvis.assistant.voice.VoiceChallenge.create()
-        val transcript = withContext(Dispatchers.Main) {
+        withContext(Dispatchers.Main) {
             tts.speak("Voice security check. Say these four words: $phrase")
             delay(4000L)
-            withTimeoutOrNull(10000L) {
-                suspendCancellableCoroutine<String> { continuation ->
-                    stt.listenOnce(
-                        onResult = { heard -> if (continuation.isActive) continuation.resume(heard) },
-                        onError = { if (continuation.isActive) continuation.resume("") },
-                        preferOffline = true
-                    )
-                    continuation.invokeOnCancellation { stt.destroy() }
-                }
-            }
+        }
+
+        // One microphone recording feeds both the offline ASR and CAM++ speaker model.
+        val sample = withContext(Dispatchers.IO) {
+            voiceAuth.captureSample(6500)
+        } ?: return false
+
+        val transcript = withContext(Dispatchers.Default) {
+            com.jarvis.assistant.voice.VoiceChallengeRecognizer(applicationContext)
+                .recognize(sample)
         } ?: return false
 
         if (!com.jarvis.assistant.voice.VoiceChallenge.matches(phrase, transcript)) return false
-
-        withContext(Dispatchers.Main) {
-            tts.speak("Repeat the same four words now for speaker verification.")
-            delay(3200L)
-        }
-        val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2600) } ?: return false
         return voiceAuth.verify(sample)
     }
 
