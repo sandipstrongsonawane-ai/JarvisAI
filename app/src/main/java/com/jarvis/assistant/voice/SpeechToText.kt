@@ -142,9 +142,14 @@ class SpeechToText(private val context: Context) {
     private fun simpleListener(onResult: (String) -> Unit, onError: () -> Unit) =
         object : RecognitionListener {
             override fun onResults(results: Bundle?) {
-                onResult(bestTranscript(results))
+                val transcript = bestTranscript(results)
+                stopInternal()
+                onResult(transcript)
             }
-            override fun onError(error: Int) = onError()
+            override fun onError(error: Int) {
+                stopInternal()
+                onError()
+            }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
