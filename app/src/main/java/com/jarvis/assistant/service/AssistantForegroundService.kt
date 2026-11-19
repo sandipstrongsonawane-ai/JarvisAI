@@ -31,6 +31,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import java.util.Calendar
 import com.jarvis.assistant.ai.JarvisLlmClient
 
@@ -60,7 +64,6 @@ class AssistantForegroundService : Service() {
     private lateinit var voiceAuth: com.jarvis.assistant.voice.VoiceAuthManager
     private lateinit var porcupine: com.jarvis.assistant.voice.PorcupineWakeWord
     private var openWake: com.jarvis.assistant.voice.OpenWakeWordEngine? = null
-    private var voiceSessionVerified = false
     private val scope = CoroutineScope(Dispatchers.Main)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var proactive: com.jarvis.assistant.util.ProactiveAlertManager? = null
@@ -547,7 +550,43 @@ class AssistantForegroundService : Service() {
         return if (confirmed) executor.executeConfirmed(command) else executor.execute(command)
     }
 
+    /**
+     * Every command entry (voice, typed chat, and PC bridge) passes this gate when voice
+     * lock is enabled. The fresh phrase is checked by STT, then a separate utterance is
+     * checked by the local neural speaker model. This is a basic replay deterrent, not
+     * liveness proof against live relays or generated speech.
+     */
+    private suspend fun authenticateVoiceForCommand(): Boolean {
+        if (!voiceAuth.isEnabled()) return true
+        if (!voiceAuth.isEnrolled()) return false
+
+        val phrase = com.jarvis.assistant.voice.VoiceChallenge.create()
+        tts.speak("Voice security check. Say these three words: $phrase")
+        delay(2600L)
+
+        val transcript = withTimeoutOrNull(10000L) {
+            suspendCancellableCoroutine<String> { continuation ->
+                stt.listenOnce(
+                    onResult = { heard -> if (continuation.isActive) continuation.resume(heard) },
+                    onError = { if (continuation.isActive) continuation.resume("") }
+                )
+            }
+        } ?: return false
+
+        if (!com.jarvis.assistant.voice.VoiceChallenge.matches(phrase, transcript)) return false
+
+        tts.speak("Repeat the same three words now for speaker verification.")
+        delay(1500L)
+        val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2600) } ?: return false
+        return voiceAuth.verify(sample)
+    }
+
     private suspend fun processSpeech(speech: String): Pair<String, Boolean> {
+
+        // Authenticate before confirmation, cancellation, routing, or any action execution.
+        if (!authenticateVoiceForCommand()) {
+            return "Voice verification failed. No command was executed. Please try again." to false
+        }
 
         // Handle explicit confirmation before OfflineBrain or any cloud model can consume it.
         if (RiskConfirmGate.hasPending()) {
@@ -574,18 +613,6 @@ class AssistantForegroundService : Service() {
 
         // Complex/multi-step requests continue through the same OfflineBrain -> Groq -> Gemini
         // structured-command pipeline. Do not split into "Done" placeholders here.
-
-        // Voice authentication — checked at most once per service session (not per command),
-        // so it's a one-time gate rather than repeated friction. Once it passes, it stays
-        // passed until the service restarts.
-        if (voiceAuth.isEnabled() && voiceAuth.isEnrolled() && !voiceSessionVerified) {
-            val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample() }
-            val passed = sample != null && voiceAuth.verify(sample)
-            if (!passed) {
-                return "Voice authentication failed, sir. The command was not executed. Please try again." to false
-            }
-            voiceSessionVerified = true
-        }
 
         weatherReplyIfAsked(speech)?.let {
             offlineBrain.recordInteraction()
