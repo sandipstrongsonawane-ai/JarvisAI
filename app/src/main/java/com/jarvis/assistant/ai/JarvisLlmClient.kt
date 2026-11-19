@@ -99,10 +99,13 @@ EXAMPLES OF TONE:
     suspend fun getCommand(userMessage: String, memoryContext: String = ""): AssistantCommand? =
         withContext(Dispatchers.IO) {
             if (userMessage.isBlank()) return@withContext null
+            val actionKeys = com.jarvis.assistant.model.ActionType.entries
+                .filter { it != com.jarvis.assistant.model.ActionType.UNKNOWN }
+                .joinToString(", ") { it.key }
             val prompt = """
 You are Jarvis' command planner. Return exactly one JSON object using this schema:
 {"action":"<key>","target":string|null,"message":string|null,"extra":{},"steps":[...]}
-Valid keys: open_app, close_app, clear_recents, uninstall_app, install_app, call, send_sms, toggle_setting, read_screen, screenshot, analyze_screen, set_volume, media_control, set_alarm, set_timer, open_clock, stopwatch, open_vision, web_search, play_media, lock_app, unlock_app, unlock_phone, set_pin, pc_connect, app_call, whatsapp_call, whatsapp_message, telegram_message, set_reminder, read_clipboard, open_clipboard_link, notif_summary, search_sms, search_photos, search_mail, agent_task, create_event, rewrite_text, now_playing, share_screen, screen_save_phone, screen_email, screen_open_link, proactive_tip, calendar_next, focus_mode, remember, recall, debrief, briefing, screen_act, open_url, multi_step, reply.
+Valid keys: $actionKeys.
 Use reply for normal conversation. For actions, specify the correct key and parameters; never claim the action is already done. For multiple actions use ordered multi_step steps without nesting. Understand Hindi, English and Hinglish; match the user's language. JSON only, no markdown.
 """ + if (memoryContext.isNotBlank()) "\nMemory context:\n$memoryContext" else ""
             val messages = JSONArray()
