@@ -140,6 +140,8 @@ Never claim an action is already done. For multiple actions use ordered multi_st
             val extra = mutableMapOf<String, String>()
             obj.optJSONObject("extra")?.let { values -> values.keys().forEach { key -> extra[key] = values.optString(key) } }
             val arr = obj.optJSONArray("steps")
+            // Only multi_step may carry a steps array; reject malformed planner output.
+            if (action != "multi_step" && arr != null) return null
             val steps = if (arr != null && arr.length() > 0) {
                 val parsed = mutableListOf<AssistantCommand>()
                 for (i in 0 until arr.length()) {
