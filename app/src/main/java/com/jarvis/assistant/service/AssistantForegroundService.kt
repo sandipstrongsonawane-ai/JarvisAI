@@ -101,7 +101,7 @@ class AssistantForegroundService : Service() {
         callAnnouncer = com.jarvis.assistant.util.IncomingCallAnnouncer(this) { tts }
         try { callAnnouncer?.start() } catch (_: Exception) {}
         executor = CommandExecutor(this)
-        gemini = GeminiClient(BuildConfig.GEMINI_API_KEY)
+        gemini = GeminiClient(apiKeyProvider = { SettingsManager(this).getGeminiApiKey().ifBlank { BuildConfig.GEMINI_API_KEY } })
         networkStatus = NetworkStatusManager(this)
         weatherClient = WeatherClient(BuildConfig.OPENWEATHER_API_KEY)
         locationHelper = LocationHelper(this)
@@ -608,7 +608,7 @@ class AssistantForegroundService : Service() {
             offlineReply to false
         } else if (networkStatus.isOnline()) {
             val groq = try {
-                JarvisLlmClient(apiKeyProvider = { BuildConfig.GROQ_API_KEY }).chat(
+                JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chat(
                     speech,
                     history = emptyList(),
                     memoryContext = buildJarvisContext(speech)
