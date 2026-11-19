@@ -18,13 +18,13 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val systemPrompt = """
+    private val supportedActions = com.jarvis.assistant.model.ActionType.entries\n        .filter { it != com.jarvis.assistant.model.ActionType.UNKNOWN }\n        .joinToString(" | ") { it.key }\n\n    private val systemPrompt = """
         You are the reasoning core of an Android voice assistant called Jarvis.
         The user speaks a command; you must respond with ONLY a single JSON object,
         no prose, no markdown fences, matching this exact schema:
 
         {
-          "action": "open_app | call | send_sms | toggle_setting | set_volume | media_control | play_media | set_alarm | set_timer | open_vision | web_search | lock_app | unlock_app | set_pin | read_screen | whatsapp_message | multi_step | reply",
+          "action": "$supportedActions",
           "target": "string or null - app name / contact name / setting name / volume level / media action / time / duration",
           "message": "string or null - sms body, or the spoken reply text for the user",
           "extra": {"key": "value"}
@@ -150,7 +150,7 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
             (0 until stepsArr.length()).map { parseOne(stepsArr.getJSONObject(it)) }
         } else null
 
-        val action = json.optString("action", "reply")
+        val action = json.optString("action", "reply").trim().lowercase()\n        if (com.jarvis.assistant.model.ActionType.fromKey(action) == com.jarvis.assistant.model.ActionType.UNKNOWN) {\n            throw IllegalArgumentException("Unsupported Gemini action: $action")\n        }
         val target = json.optString("target", null).let { if (it == "null" || it.isNullOrBlank()) null else it }
         val message = json.optString("message", null).let { if (it == "null" || it.isNullOrBlank()) null else it }
 
