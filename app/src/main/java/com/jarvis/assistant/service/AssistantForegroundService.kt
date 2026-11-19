@@ -17,6 +17,7 @@ import com.jarvis.assistant.ai.GeminiClient
 import com.jarvis.assistant.brain.BrainState
 import com.jarvis.assistant.brain.OfflineBrain
 import com.jarvis.assistant.executor.CommandExecutor
+import com.jarvis.assistant.executor.RiskConfirmGate
 import com.jarvis.assistant.network.PcBridgeServer
 import com.jarvis.assistant.util.FileFinder
 import com.jarvis.assistant.util.LocationHelper
@@ -534,6 +535,29 @@ class AssistantForegroundService : Service() {
 
     private suspend fun processSpeech(speech: String): Pair<String, Boolean> {
 
+        // Handle explicit confirmation before OfflineBrain or any cloud model can consume it.
+        if (RiskConfirmGate.hasPending()) {
+            when {
+                RiskConfirmGate.isCancelSpeech(speech) -> {
+                    RiskConfirmGate.cancel()
+                    return "Cancelled. No action was executed." to false
+                }
+                RiskConfirmGate.isConfirmSpeech(speech) -> {
+                    val pending = RiskConfirmGate.takeIfConfirm(speech)
+                    if (pending != null) {
+                        return try {
+                            executor.executeConfirmed(pending) to false
+                        } catch (e: Exception) {
+                            "The confirmed action failed: ${e.message ?: "unknown error"}" to false
+                        }
+                    }
+                    RiskConfirmGate.cancel()
+                    return "The confirmation expired. Please repeat the command." to false
+                }
+                else -> RiskConfirmGate.cancel() // New request cancels the previous pending action.
+            }
+        }
+
         // Multi-command: split and run each segment through offline brain + executor path once
         try {
             val segments = com.jarvis.assistant.util.CommandChainSplitter.split(speech)
@@ -610,29 +634,34 @@ class AssistantForegroundService : Service() {
         } else if (offlineReply != null) {
             offlineReply to false
         } else if (networkStatus.isOnline()) {
-            val groq = try {
-                JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chat(
-                    speech,
-                    history = emptyList(),
-                    memoryContext = buildJarvisContext(speech)
-                )
+            val groqClient = JarvisLlmClient(
+                apiKeyProvider = {
+                    SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY }
+                }
+            )
+            val groqCommand = try {
+                groqClient.getCommand(speech, buildJarvisContext(speech))
             } catch (e: Exception) {
+                android.util.Log.e("JarvisService", "Groq command planning failed", e)
                 null
             }
-            if (groq != null && groq.ok && groq.text.isNotBlank()) {
-                groq.text to true
+            if (groqCommand != null) {
+                try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
+                try {
+                    executor.execute(groqCommand) to true
+                } catch (e: Exception) {
+                    android.util.Log.e("JarvisService", "Groq action execution failed", e)
+                    "The requested action could not be executed: ${e.message ?: "unknown error"}" to true
+                }
             } else {
                 try {
+                    // Gemini is the structured-command fallback, using the same executor.
                     val command = gemini.getCommand(speech)
                     try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
-                executor.execute(command) to true
+                    executor.execute(command) to true
                 } catch (e: Exception) {
-                    val hint = groq?.error.orEmpty()
-                    if (hint.contains("API key", ignoreCase = true)) {
-                        "Cloud intelligence is not configured, sir. On-device commands remain fully operational." to true
-                    } else {
-                        "I was unable to reach external systems, sir. Please try an on-device command." to true
-                    }
+                    android.util.Log.e("JarvisService", "Both cloud command planners failed", e)
+                    "I couldn't interpret or execute that request. Please try a clearer command." to true
                 }
             }
         } else {
