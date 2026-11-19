@@ -45,6 +45,18 @@ class OfflineBrain(
         // Add to conversation history
         conversationContext.addMessage(text, isUserInput = true)
 
+        // A small deterministic offline multi-action path; complex plans go to the AI brain.
+        Regex("""(?i)open\\s+(.+?)\\s+(?:and then|then|phir)\\s+open\\s+(.+)""")
+            .find(text)?.let { match ->
+                val steps = listOf(
+                    com.jarvis.assistant.model.AssistantCommand("open_app", match.groupValues[1].trim()),
+                    com.jarvis.assistant.model.AssistantCommand("open_app", match.groupValues[2].trim())
+                )
+                return executor.execute(
+                    com.jarvis.assistant.model.AssistantCommand("multi_step", steps = steps)
+                )
+            }
+
         if (containsAny(cmd, "who is this", "identify person", "identify face", "who is that", "chehra pehchano")) {
             return try {
                 val i = android.content.Intent(context, com.jarvis.assistant.vision.VisionActivity::class.java)
