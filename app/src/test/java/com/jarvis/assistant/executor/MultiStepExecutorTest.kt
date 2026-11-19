@@ -69,4 +69,16 @@ class MultiStepExecutorTest {
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
+    @Test
+    fun rejectsStepsArrayOnSingleActionCommand() {
+        val client = JarvisLlmClient(apiKeyProvider = { "test" })
+        val method = JarvisLlmClient::class.java.getDeclaredMethod("parseAssistantCommand", String::class.java)
+        method.isAccessible = true
+        val parsed = method.invoke(
+            client,
+            """{"action":"open_app","target":"Chrome","steps":[{"action":"open_app","target":"Maps"}]}"""
+        )
+        assertNull(parsed)
+    }
+
 }
