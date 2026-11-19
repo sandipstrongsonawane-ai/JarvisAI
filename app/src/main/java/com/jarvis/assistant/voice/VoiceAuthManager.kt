@@ -70,7 +70,18 @@ class VoiceAuthManager(private val context: Context) {
             try { if (started) recorder.stop() } catch (_: Exception) {}
             recorder.release()
         }
-        return if (offset >= sampleRate * 12 / 10) output.copyOf(offset) else null
+        if (offset < sampleRate * 12 / 10) return null
+        val captured = output.copyOf(offset)
+        var energy = 0.0
+        var peak = 0
+        captured.forEach {
+            val value = kotlin.math.abs(it.toInt())
+            if (value > peak) peak = value
+            val normalized = it / 32768.0
+            energy += normalized * normalized
+        }
+        val rms = kotlin.math.sqrt(energy / captured.size).toFloat()
+        return if (rms >= 0.004f && peak >= 500) captured else null
     }
 
     suspend fun enrollFromSamples(samples: List<ShortArray>): Boolean = withContext(Dispatchers.Default) {
