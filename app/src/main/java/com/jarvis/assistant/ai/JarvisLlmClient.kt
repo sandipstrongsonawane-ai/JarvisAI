@@ -1,5 +1,6 @@
 package com.jarvis.assistant.ai
 
+import com.jarvis.assistant.model.AssistantCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -94,6 +95,53 @@ EXAMPLES OF TONE:
             performRequest(body)
         }
 
+    /** Convert user speech into a validated structured command for the shared executor. */
+    suspend fun getCommand(userMessage: String, memoryContext: String = ""): AssistantCommand? =
+        withContext(Dispatchers.IO) {
+            if (userMessage.isBlank()) return@withContext null
+            val prompt = """
+You are Jarvis' command planner. Return exactly one JSON object using this schema:
+{"action":"<key>","target":string|null,"message":string|null,"extra":{},"steps":[...]}
+Valid keys: open_app, close_app, clear_recents, uninstall_app, install_app, call, send_sms, toggle_setting, read_screen, screenshot, analyze_screen, set_volume, media_control, set_alarm, set_timer, open_clock, stopwatch, open_vision, web_search, play_media, lock_app, unlock_app, unlock_phone, set_pin, pc_connect, app_call, whatsapp_call, whatsapp_message, telegram_message, set_reminder, read_clipboard, open_clipboard_link, notif_summary, search_sms, search_photos, search_mail, agent_task, create_event, rewrite_text, now_playing, share_screen, screen_save_phone, screen_email, screen_open_link, proactive_tip, calendar_next, focus_mode, remember, recall, debrief, briefing, screen_act, open_url, multi_step, reply.
+Use reply for normal conversation. For actions, specify the correct key and parameters; never claim the action is already done. For multiple actions use ordered multi_step steps without nesting. Understand Hindi, English and Hinglish; match the user's language. JSON only, no markdown.
+""" + if (memoryContext.isNotBlank()) "\nMemory context:\n$memoryContext" else ""
+            val messages = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", prompt))
+                .put(JSONObject().put("role", "user").put("content", userMessage))
+            val body = JSONObject().put("model", model).put("messages", messages)
+                .put("temperature", 0.1).put("max_tokens", 500)
+            val response = performRequest(body)
+            if (!response.ok) return@withContext null
+            parseAssistantCommand(response.text)
+        }
+
+    private fun parseAssistantCommand(raw: String): AssistantCommand? = try {
+        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val start = cleaned.indexOf('{'); val end = cleaned.lastIndexOf('}')
+        if (start < 0 || end <= start) return null
+        val root = JSONObject(cleaned.substring(start, end + 1))
+        fun parseOne(obj: JSONObject): AssistantCommand? {
+            val action = obj.optString("action", "reply").trim().lowercase()
+            if (com.jarvis.assistant.model.ActionType.fromKey(action) == com.jarvis.assistant.model.ActionType.UNKNOWN) return null
+            val target = obj.optString("target").takeUnless { it.isBlank() || it == "null" }
+            val message = obj.optString("message").takeUnless { it.isBlank() || it == "null" }
+            val extra = mutableMapOf<String, String>()
+            obj.optJSONObject("extra")?.let { values -> values.keys().forEach { key -> extra[key] = values.optString(key) } }
+            val arr = obj.optJSONArray("steps")
+            val steps = if (arr != null && arr.length() > 0) {
+                val parsed = mutableListOf<AssistantCommand>()
+                for (i in 0 until arr.length()) {
+                    val step = parseOne(arr.getJSONObject(i)) ?: return null
+                    if (step.action == "multi_step") return null
+                    parsed += step
+                }
+                parsed
+            } else null
+            if (action == "multi_step" && steps.isNullOrEmpty()) return null
+            return AssistantCommand(action, target, message, extra, steps)
+        }
+        parseOne(root)
+    } catch (_: Exception) { null }
     /**
      * Sends one image plus an optional instruction to a vision-capable Groq model.
      * [base64Image] must be raw base64 (no data: prefix) and [mimeType] like "image/jpeg".
