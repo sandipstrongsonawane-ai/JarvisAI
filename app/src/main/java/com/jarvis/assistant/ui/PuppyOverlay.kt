@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
