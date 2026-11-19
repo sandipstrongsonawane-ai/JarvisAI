@@ -204,7 +204,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
                 return@launch
             }
             val result = withContext(Dispatchers.IO) {
-                JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chatWithImage(prompt, base64, mime)
+                JarvisLlmClient(apiKeyProvider = { SettingsManager(this@ChatActivity).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chatWithImage(prompt, base64, mime)
             }
             if (result.ok) {
                 addBubble(result.text, isUser = false)
