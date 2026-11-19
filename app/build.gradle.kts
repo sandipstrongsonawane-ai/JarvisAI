@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.net.URL
 import java.security.MessageDigest
 
 plugins {
@@ -134,7 +135,7 @@ val downloadSpeakerModel by tasks.registering {
             file.parentFile.mkdirs()
             val temporary = file.resolveSibling(file.name + ".part")
             try {
-                java.net.URL(
+                URL(
                     "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
                 ).openStream().use { input ->
                     temporary.outputStream().use { output -> input.copyTo(output) }
