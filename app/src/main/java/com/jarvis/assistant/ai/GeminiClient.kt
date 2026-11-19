@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class GeminiClient(private val apiKey: String) {
+class GeminiClient(private val apiKeyProvider: () -> String?) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -81,7 +81,11 @@ class GeminiClient(private val apiKey: String) {
             })
         }
 
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
+        val apiKey = apiKeyProvider()?.trim().orEmpty()
+        if (apiKey.isBlank()) {
+            return@withContext AssistantCommand(action = "reply", message = "Gemini API key missing. Add it in Settings.")
+        }
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${android.net.Uri.encode(apiKey)}"
 
         val request = Request.Builder()
             .url(url)
