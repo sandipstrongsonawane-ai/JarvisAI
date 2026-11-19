@@ -28,6 +28,7 @@ import androidx.core.content.ContextCompat
 import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.R
 import com.jarvis.assistant.ai.JarvisLlmClient
+import com.jarvis.assistant.util.SettingsManager
 import com.jarvis.assistant.brain.BrainState
 import com.jarvis.assistant.service.AssistantForegroundService
 import kotlinx.coroutines.CoroutineScope
@@ -203,7 +204,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
                 return@launch
             }
             val result = withContext(Dispatchers.IO) {
-                JarvisLlmClient(apiKeyProvider = { BuildConfig.GROQ_API_KEY }).chatWithImage(prompt, base64, mime)
+                JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chatWithImage(prompt, base64, mime)
             }
             if (result.ok) {
                 addBubble(result.text, isUser = false)
