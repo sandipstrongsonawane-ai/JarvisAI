@@ -68,6 +68,22 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun parsesTorchOnThenOpenAppWithoutDroppingSecondAction() {
+        val steps = executor().parseOfflineChain("torch on and then open Chrome")
+        assertEquals(2, steps?.size)
+        assertEquals("torch_on", steps?.get(0)?.target)
+        assertEquals("Chrome", steps?.get(1)?.target)
+    }
+
+    @Test
+    fun parsesOpenAppThenTorchOffInOrder() {
+        val steps = executor().parseOfflineChain("open Chrome and then torch off")
+        assertEquals(2, steps?.size)
+        assertEquals("Chrome", steps?.get(0)?.target)
+        assertEquals("torch_off", steps?.get(1)?.target)
+    }
+
+    @Test
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
