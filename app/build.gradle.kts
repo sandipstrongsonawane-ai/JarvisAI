@@ -164,4 +164,86 @@ val downloadSpeakerModel by tasks.registering {
 
 tasks.named("preBuild").configure {
     dependsOn(downloadSpeakerModel)
+    dependsOn(downloadVoiceChallengeAsrModel)
 }
+
+// Pinned offline English ASR model used only for the one-use voice-auth challenge.
+// The int8 encoder is ~43 MB; the model is verified before extraction and never
+// downloaded at runtime. The model is Apache-2.0 licensed.
+val voiceChallengeModelDir = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17"
+val voiceChallengeArchive = layout.buildDirectory.file(
+    "downloads/$voiceChallengeModelDir.tar.bz2"
+)
+val voiceChallengeAssets = layout.projectDirectory.dir("src/main/assets/voice_challenge")
+val downloadVoiceChallengeAsrModel by tasks.registering {
+    outputs.dir(voiceChallengeAssets)
+    outputs.upToDateWhen { false }
+    doLast {
+        val archive = voiceChallengeArchive.get().asFile
+        val expectedSize = 127887156L
+        val expectedSha256 = "9c559283e8498d3fe95913c79ca1cb454bb26281ac2b102b41306c7d752765d9"
+        fun sha256(file: java.io.File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1024 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        archive.parentFile.mkdirs()
+        if (!archive.exists() || archive.length() != expectedSize || sha256(archive) != expectedSha256) {
+            val temporary = archive.resolveSibling(archive.name + ".part")
+            try {
+                URL(
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$voiceChallengeModelDir.tar.bz2"
+                ).openStream().use { input ->
+                    temporary.outputStream().use { output -> input.copyTo(output) }
+                }
+                check(temporary.length() == expectedSize) { "Voice challenge ASR archive size verification failed" }
+                check(sha256(temporary) == expectedSha256) { "Voice challenge ASR archive SHA-256 verification failed" }
+                check(temporary.renameTo(archive)) { "Could not install verified voice challenge ASR archive" }
+            } finally {
+                if (temporary.exists()) temporary.delete()
+            }
+        }
+
+        val outputDir = voiceChallengeAssets.asFile
+        outputDir.mkdirs()
+        val requiredFiles = listOf(
+            "encoder-epoch-99-avg-1.int8.onnx",
+            "decoder-epoch-99-avg-1.onnx",
+            "joiner-epoch-99-avg-1.int8.onnx",
+            "tokens.txt"
+        )
+        val ready = requiredFiles.all { name ->
+            val file = outputDir.resolve(name)
+            file.exists() && file.length() > if (name == "tokens.txt") 1024L else 100_000L
+        }
+        if (!ready) {
+            requiredFiles.forEach { outputDir.resolve(it).delete() }
+            copy {
+                from(tarTree(resources.bzip2(archive))) {
+                    include("$voiceChallengeModelDir/encoder-epoch-99-avg-1.int8.onnx")
+                    include("$voiceChallengeModelDir/decoder-epoch-99-avg-1.onnx")
+                    include("$voiceChallengeModelDir/joiner-epoch-99-avg-1.int8.onnx")
+                    include("$voiceChallengeModelDir/tokens.txt")
+                    eachFile { path = name }
+                    includeEmptyDirs = false
+                }
+                into(outputDir)
+            }
+        }
+        requiredFiles.forEach { name ->
+            val file = outputDir.resolve(name)
+            check(file.exists() && file.length() > if (name == "tokens.txt") 1024L else 100_000L) {
+                "Voice challenge ASR model asset missing or truncated: $name"
+            }
+        }
+    }
+}
+
