@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -66,6 +67,7 @@ android {
 
 dependencies {
     implementation("xyz.rementia:openwakeword:0.1.5")
+    implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.biometric:biometric:1.1.0")
@@ -111,4 +113,41 @@ android.applicationVariants.configureEach {
         (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
             .outputFileName = "jarvis.apk"
     }
+}
+
+
+// Bundle the pinned offline speaker model into the APK; no model download is needed at runtime.
+val speakerModel = layout.projectDirectory.file(
+    "src/main/assets/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+)
+val downloadSpeakerModel by tasks.registering {
+    outputs.file(speakerModel)
+    doLast {
+        val file = speakerModel.asFile
+        val expectedSize = 29596979L
+        val expectedSha256 = "98daf9bcf1c8abf3db374fec4c27a5eda7c58705bb3f180d057b085a72a88bb5"
+        fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+            .digest(bytes).joinToString("") { "%02x".format(it) }
+
+        if (!file.exists() || file.length() != expectedSize || sha256(file.readBytes()) != expectedSha256) {
+            file.parentFile.mkdirs()
+            val temporary = file.resolveSibling(file.name + ".part")
+            try {
+                java.net.URL(
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+                ).openStream().use { input ->
+                    temporary.outputStream().use { output -> input.copyTo(output) }
+                }
+                check(temporary.length() == expectedSize) { "Speaker model size verification failed" }
+                check(sha256(temporary.readBytes()) == expectedSha256) { "Speaker model SHA-256 verification failed" }
+                check(temporary.renameTo(file)) { "Could not install verified speaker model asset" }
+            } finally {
+                if (temporary.exists()) temporary.delete()
+            }
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(downloadSpeakerModel)
 }
