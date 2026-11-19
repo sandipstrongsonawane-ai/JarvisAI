@@ -10,6 +10,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.widget.Button
 import android.widget.EditText
@@ -32,6 +33,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -290,6 +294,49 @@ class SettingsActivity : AppCompatActivity() {
                 if (name.isNotBlank()) { settings.setUserName(name); toast("Saved.") }
             })
         })
+        
+        root.addView(sectionCard {
+            addView(sectionTitle("Cloud AI API Keys"))
+            addView(bodyText("Add your own keys here. They are encrypted on this phone. Groq is tried first; Gemini is the fallback."))
+            val groqInput = hudEditText(settings.getGroqApiKey()).apply {
+                hint = "Groq API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            val geminiInput = hudEditText(settings.getGeminiApiKey()).apply {
+                hint = "Gemini API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            addView(bodyText("GROQ"))
+            addView(groqInput)
+            addView(bodyText("GEMINI"))
+            addView(geminiInput)
+            var keysVisible = false
+            addView(hudButton("SHOW / HIDE KEYS") {
+                keysVisible = !keysVisible
+                val type = InputType.TYPE_CLASS_TEXT or if (keysVisible) {
+                    InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                } else {
+                    InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                groqInput.inputType = type
+                geminiInput.inputType = type
+                groqInput.setSelection(groqInput.text.length)
+                geminiInput.setSelection(geminiInput.text.length)
+            })
+            addView(hudButton("SAVE API KEYS", filled = true) {
+                settings.setGroqApiKey(groqInput.text.toString().trim())
+                settings.setGeminiApiKey(geminiInput.text.toString().trim())
+                toast("API keys saved securely on this phone.")
+            })
+            addView(hudButton("TEST GROQ CONNECTION") {
+                testCloudKey("Groq", groqInput.text.toString().trim())
+            })
+            addView(hudButton("TEST GEMINI CONNECTION") {
+                testCloudKey("Gemini", geminiInput.text.toString().trim())
+            })
+        })
 
         root.addView(sectionCard {
             addView(sectionTitle("Remembered Note"))
@@ -422,6 +469,42 @@ class SettingsActivity : AppCompatActivity() {
 
         return ScrollView(this).apply {
             addView(root)
+        }
+    }
+
+    private fun testCloudKey(provider: String, key: String) {
+        if (key.isBlank()) {
+            toast("Enter the $provider API key first.")
+            return
+        }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val client = OkHttpClient.Builder()
+                        .connectTimeout(12, TimeUnit.SECONDS)
+                        .readTimeout(15, TimeUnit.SECONDS)
+                        .build()
+                    val request = if (provider == "Groq") {
+                        Request.Builder()
+                            .url("https://api.groq.com/openai/v1/models")
+                            .header("Authorization", "Bearer $key")
+                            .get()
+                            .build()
+                    } else {
+                        Request.Builder()
+                            .url("https://generativelanguage.googleapis.com/v1beta/models?key=" + android.net.Uri.encode(key))
+                            .get()
+                            .build()
+                    }
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) "$provider connection successful."
+                        else "$provider test failed (HTTP ${response.code}). Check the key and provider access."
+                    }
+                } catch (_: Exception) {
+                    "$provider test failed. Check internet connection and try again."
+                }
+            }
+            toast(result)
         }
     }
 
