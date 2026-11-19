@@ -12,7 +12,7 @@ object VoiceChallenge {
     )
 
     @Synchronized
-    fun create(): String = (1..3).map { words[random.nextInt(words.size)] }.joinToString(" ")
+    fun create(): String = (1..4).map { words[random.nextInt(words.size)] }.joinToString(" ")
 
     fun matches(expected: String, transcript: String): Boolean {
         fun normalize(value: String) = value.lowercase()
