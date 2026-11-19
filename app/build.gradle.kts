@@ -76,7 +76,11 @@ android {
 
 dependencies {
     implementation("xyz.rementia:openwakeword:0.1.5")
-    implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1")
+    implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
+        // The Android AAR already contains the sherpa JVM API classes.
+        // Exclude the separately published JVM JAR to prevent duplicate classes.
+        exclude(group = "com.github.k2-fsa", module = "sherpa-onnx-jvm")
+    }
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.biometric:biometric:1.1.0")
