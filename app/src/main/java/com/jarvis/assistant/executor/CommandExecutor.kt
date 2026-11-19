@@ -485,6 +485,8 @@ class CommandExecutor(private val context: Context) {
                 "Opening Bluetooth settings"
             }
             "flashlight" -> toggleFlashlight()
+            "torch_on" -> setFlashlight(true)
+            "torch_off" -> setFlashlight(false)
             "airplane_mode" -> {
                 context.startActivity(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 "Opening airplane mode settings"
@@ -494,12 +496,15 @@ class CommandExecutor(private val context: Context) {
     }
 
     private var torchOn = false
-    private fun toggleFlashlight(): String {
+    private fun toggleFlashlight(): String = setFlashlight(!torchOn)
+
+    private fun setFlashlight(enabled: Boolean): String {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val camId = cameraManager.cameraIdList.firstOrNull() ?: return "No suitable camera module detected, sir."
-        torchOn = !torchOn
-        cameraManager.setTorchMode(camId, torchOn)
-        return if (torchOn) "Flashlight activated, sir." else "Flashlight deactivated, sir."
+        val camId = cameraManager.cameraIdList.firstOrNull()
+            ?: return "No suitable camera module detected, sir."
+        cameraManager.setTorchMode(camId, enabled)
+        torchOn = enabled
+        return if (enabled) "Flashlight activated, sir." else "Flashlight deactivated, sir."
     }
 
     /** Volume control on the music stream (what "volume up/down/mute" means for most users). */
