@@ -85,10 +85,17 @@ class VoiceAuthManager(private val context: Context) {
     }
 
     suspend fun enrollFromSamples(samples: List<ShortArray>): Boolean = withContext(Dispatchers.Default) {
-        if (samples.size < 2 || samples.any { it.size < sampleRate * 12 / 10 }) return@withContext false
+        // Settings enrollment records three independent utterances. Do not silently
+        // accept a partial enrollment or average embeddings from inconsistent speakers.
+        if (samples.size < 3 || samples.any { it.size < sampleRate * 12 / 10 }) return@withContext false
         val vectors = samples.map { embedding(it) ?: return@withContext false }
         val dimension = vectors.first().size
         if (dimension <= 0 || vectors.any { it.size != dimension }) return@withContext false
+        for (i in vectors.indices) {
+            for (j in i + 1 until vectors.size) {
+                if (cosineSimilarity(vectors[i], vectors[j]) < threshold) return@withContext false
+            }
+        }
         val average = FloatArray(dimension)
         vectors.forEach { vector -> for (i in vector.indices) average[i] += vector[i] }
         for (i in average.indices) average[i] /= vectors.size.toFloat()
