@@ -46,7 +46,7 @@ class OfflineBrain(
         conversationContext.addMessage(text, isUserInput = true)
 
         // A small deterministic offline multi-action path; complex plans go to the AI brain.
-        Regex("""(?i)open\\s+(.+?)\\s+(?:and then|then|phir)\\s+open\\s+(.+)""")
+        Regex("""(?i)open\s+(.+?)\s+(?:and then|then|phir)\s+open\\s+(.+)""")
             .find(text)?.let { match ->
                 val steps = listOf(
                     com.jarvis.assistant.model.AssistantCommand("open_app", match.groupValues[1].trim()),
