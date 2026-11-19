@@ -128,7 +128,7 @@ class MultiStepExecutor(
         val l = out.lowercase()
         val keys = listOf(
             "couldn't", "could not", "failed", "unable", "not found",
-            "permission", "i didn't understand", "unknown", "error",
+            "permission", "i didn't understand", "unknown", "unknown setting", "error",
             "which application", "which app"
         )
         return keys.any { l.contains(it) }
