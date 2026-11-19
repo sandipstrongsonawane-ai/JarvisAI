@@ -108,6 +108,7 @@ class AssistantForegroundService : Service() {
         pcBridge = PcBridgeServer(this) { speech -> processSpeech(speech) }
         voiceAuth = com.jarvis.assistant.voice.VoiceAuthManager(this)
         porcupine = com.jarvis.assistant.voice.PorcupineWakeWord(this)
+        openWake = com.jarvis.assistant.voice.OpenWakeWordEngine(applicationContext)
         offlineBrain = OfflineBrain(this, executor) { turnOn ->
             if (turnOn) pcBridge.start() else pcBridge.stop()
         }
@@ -144,59 +145,61 @@ class AssistantForegroundService : Service() {
         try { clapDetector.stop() } catch (_: Exception) {}
     }
 
+    /**
+     * Background wake detection is strictly on-device.
+     * SpeechRecognizer is only started after the wake engine detects "Hey Jarvis".
+     * No continuous Google STT fallback: it causes repeated Android mic activation tones.
+     */
     private fun startWakeWordListening() {
-        val sm = com.jarvis.assistant.util.SettingsManager(this)
+        val sm = SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             android.util.Log.i("JarvisService", "Wake off in settings")
+            releaseAllMics()
             return
         }
-        listenCycleRunning = false
+        if (listenCycleRunning) return
+
+        // Ensure only one microphone owner is active.
         try { stt.stopContinuous() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
         try { openWake?.stop() } catch (_: Exception) {}
-        try { Thread.sleep(200) } catch (_: Exception) {}
 
-        // STT-only wake (OpenWake/Porcupine skipped until stable on device)
-        android.util.Log.w("JarvisService", "Using STT continuous wake — say Hey Jarvis")
-        startSttWakeFallback()
-    }
-
-    private fun startSttWakeFallback() {
-        val sm = com.jarvis.assistant.util.SettingsManager(this)
-        if (!sm.getBackgroundListen()) {
-            android.util.Log.i("JarvisService", "Background listen off — STT wake idle")
-            try { stt.stopContinuous() } catch (_: Exception) {}
-            return
-        }
-        android.util.Log.i("JarvisService", "STT continuous wake (Hey Jarvis)")
-        try {
-            stt.listenContinuous { trailing ->
-                mainHandler.post {
-                    try { stt.stopContinuous() } catch (_: Exception) {}
-                    try { porcupine.stop() } catch (_: Exception) {}
+        val onWake: () -> Unit = {
+            mainHandler.post {
+                if (!listenCycleRunning) {
+                    android.util.Log.i("JarvisService", "On-device wake detected — opening command STT")
                     try { openWake?.stop() } catch (_: Exception) {}
-                    if (trailing.isNotBlank()) {
-                        handleUserSpeech(trailing)
-                    } else {
-                        startListeningCycle()
-                    }
-                    mainHandler.postDelayed({
-                        if (com.jarvis.assistant.util.SettingsManager(this).getBackgroundListen()) {
-                            startWakeWordListening()
-                        }
-                    }, 5_000L)
+                    try { porcupine.stop() } catch (_: Exception) {}
+                    startListeningCycle()
                 }
             }
+        }
+
+        val openWakeStarted = try { openWake?.start(onWake) == true } catch (e: Exception) {
+            android.util.Log.e("JarvisService", "OpenWakeWord start failed: ${e.message}", e)
+            false
+        }
+        if (openWakeStarted) {
+            android.util.Log.i("JarvisService", "On-device OpenWakeWord active — Hey Jarvis")
+            return
+        }
+
+        // Optional on-device fallback; only available when a Picovoice key is configured.
+        val porcupineStarted = try {
+            porcupine.start(onWake) { error ->
+                android.util.Log.e("JarvisService", "Porcupine fallback failed: $error")
+            }
         } catch (e: Exception) {
-            android.util.Log.e("JarvisService", "STT wake failed: ${e.message}")
+            android.util.Log.e("JarvisService", "Porcupine start failed: ${e.message}", e)
+            false
+        }
+        if (porcupineStarted) {
+            android.util.Log.i("JarvisService", "On-device Porcupine fallback active — Jarvis")
+        } else {
+            android.util.Log.e("JarvisService", "No on-device wake engine could start; background wake remains idle")
+            try { stt.stopContinuous() } catch (_: Exception) {}
         }
     }
-
-
-
-
-
-
 
     /** Text chat — same offline-first pipeline as voice. */
     fun submitText(text: String) {
