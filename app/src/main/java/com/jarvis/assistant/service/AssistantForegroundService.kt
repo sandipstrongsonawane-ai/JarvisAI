@@ -558,39 +558,8 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // Multi-command: split and run each segment through offline brain + executor path once
-        try {
-            val segments = com.jarvis.assistant.util.CommandChainSplitter.split(speech)
-            if (segments != null && segments.size >= 2 && segments.size <= 5) {
-                val replies = mutableListOf<String>()
-                for ((i, seg) in segments.withIndex()) {
-                    val one = try {
-                        offlineBrain.handle(seg) ?: "Done."
-                    } catch (_: Exception) {
-                        "Step failed."
-                    }
-                    // Skip special tokens
-                    val clean = when (one) {
-                        "REQUEST_BRIEFING" -> try {
-                            com.jarvis.assistant.util.BriefingHelper(this@AssistantForegroundService)
-                                .build(includeWeather = networkStatus.isOnline()).text
-                        } catch (_: Exception) { "Briefing unavailable." }
-                        else -> one
-                    }
-                    replies += clean
-                    if (i < segments.lastIndex) kotlinx.coroutines.delay(650)
-                }
-                val summary = buildString {
-                    append("Executed ${segments.size} steps, sir. ")
-                    replies.forEachIndexed { i, r ->
-                        append("Step ${i + 1}: ")
-                        append(r.trim().trimEnd('.'))
-                        append(". ")
-                    }
-                }
-                return summary.trim() to false
-            }
-        } catch (_: Exception) { }
+        // Complex/multi-step requests continue through the same OfflineBrain -> Groq -> Gemini
+        // structured-command pipeline. Do not split into "Done" placeholders here.
 
         // Voice authentication — checked at most once per service session (not per command),
         // so it's a one-time gate rather than repeated friction. Once it passes, it stays
