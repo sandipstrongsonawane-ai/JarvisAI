@@ -562,7 +562,7 @@ class AssistantForegroundService : Service() {
 
         val phrase = com.jarvis.assistant.voice.VoiceChallenge.create()
         val transcript = withContext(Dispatchers.Main) {
-            tts.speak("Voice security check. Say these three words: $phrase")
+            tts.speak("Voice security check. Say these four words: $phrase")
             delay(4000L)
             withTimeoutOrNull(10000L) {
                 suspendCancellableCoroutine<String> { continuation ->
@@ -579,7 +579,7 @@ class AssistantForegroundService : Service() {
         if (!com.jarvis.assistant.voice.VoiceChallenge.matches(phrase, transcript)) return false
 
         withContext(Dispatchers.Main) {
-            tts.speak("Repeat the same three words now for speaker verification.")
+            tts.speak("Repeat the same four words now for speaker verification.")
             delay(3200L)
         }
         val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2600) } ?: return false
