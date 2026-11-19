@@ -115,7 +115,8 @@ Use reply for normal conversation. For actions, specify the correct key and para
             parseAssistantCommand(response.text)
         }
 
-    private fun parseAssistantCommand(raw: String): AssistantCommand? = try {
+    private fun parseAssistantCommand(raw: String): AssistantCommand? {
+        return try {
         val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val start = cleaned.indexOf('{'); val end = cleaned.lastIndexOf('}')
         if (start < 0 || end <= start) return null
@@ -141,7 +142,9 @@ Use reply for normal conversation. For actions, specify the correct key and para
             return AssistantCommand(action, target, message, extra, steps)
         }
         parseOne(root)
-    } catch (_: Exception) { null }
+        } catch (_: Exception) { null }
+    }
+
     /**
      * Sends one image plus an optional instruction to a vision-capable Groq model.
      * [base64Image] must be raw base64 (no data: prefix) and [mimeType] like "image/jpeg".
