@@ -351,9 +351,10 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(sectionCard {
             addView(sectionTitle("Voice Authentication", R.drawable.ic_mic))
             addView(bodyText(
-                "Approximate on-device voice matching — not a bank-grade biometric, but good " +
-                "enough to reject an obviously different voice. Checked once per app session, " +
-                "not on every command."
+                "Offline neural speaker verification (CAM++). When Voice Lock is ON, Jarvis " +
+                "checks the speaker before every spoken command. Typed chat is not voice-verified. " +
+                "The random spoken phrase is only a basic replay deterrent; it cannot guarantee " +
+                "liveness or stop live relays and generated-voice attacks. This is not bank-grade security."
             ))
             voiceAuthStatus = bodyText(voiceAuthStatusText())
             addView(voiceAuthStatus)
