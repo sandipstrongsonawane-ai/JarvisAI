@@ -568,7 +568,8 @@ class AssistantForegroundService : Service() {
             suspendCancellableCoroutine<String> { continuation ->
                 stt.listenOnce(
                     onResult = { heard -> if (continuation.isActive) continuation.resume(heard) },
-                    onError = { if (continuation.isActive) continuation.resume("") }
+                    onError = { if (continuation.isActive) continuation.resume("") },
+                    preferOffline = true
                 )
             }
         } ?: return false
