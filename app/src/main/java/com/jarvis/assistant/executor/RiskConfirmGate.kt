@@ -42,13 +42,20 @@ object RiskConfirmGate {
             return false
         }
         return when (type) {
-            // Hands-free: voice call executes immediately (user already spoke the command)
+            // Calls remain immediate when explicitly requested. Messages and destructive
+            // actions require a second confirmation to prevent speech-recognition mistakes.
             ActionType.CALL -> false
-            ActionType.MULTI_STEP -> true
-            ActionType.UNLOCK_APP -> true
+            ActionType.MULTI_STEP,
+            ActionType.UNLOCK_APP,
+            ActionType.UNINSTALL_APP,
+            ActionType.SEND_SMS,
+            ActionType.WHATSAPP_MESSAGE,
+            ActionType.TELEGRAM_MESSAGE,
+            ActionType.SET_PIN,
+            ActionType.UNLOCK_PHONE -> true
             else -> {
                 val a = cmd.action.lowercase()
-                a.contains("delete") || a.contains("wipe") || a == "multi_step"
+                a.contains("delete") || a.contains("wipe")
             }
         }
     }
@@ -66,6 +73,12 @@ object RiskConfirmGate {
                 "Run a multi-step sequence? Say confirm or cancel."
             ActionType.UNLOCK_APP ->
                 "Unlock ${cmd.target ?: "the app"}? Say confirm or cancel."
+            ActionType.SEND_SMS, ActionType.WHATSAPP_MESSAGE, ActionType.TELEGRAM_MESSAGE ->
+                "Send the message to ${cmd.target ?: "this recipient"}? Say confirm or cancel."
+            ActionType.UNINSTALL_APP ->
+                "Uninstall ${cmd.target ?: "this app"}? Say confirm or cancel."
+            ActionType.SET_PIN ->
+                "Set or change the device app PIN? Say confirm or cancel."
             else ->
                 "Proceed with ${cmd.action}? Say confirm or cancel."
         }
