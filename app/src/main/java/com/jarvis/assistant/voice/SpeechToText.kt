@@ -26,11 +26,11 @@ class SpeechToText(private val context: Context) {
         "जार्विस", "जारविस", "जर्विस", "हे जार्विस"
     )
 
-    fun listenOnce(onResult: (String) -> Unit, onError: () -> Unit) {
+    fun listenOnce(onResult: (String) -> Unit, onError: () -> Unit, preferOffline: Boolean = false) {
         stopInternal()
         recognizer = SpeechRecognizer.createSpeechRecognizer(context)
         recognizer?.setRecognitionListener(simpleListener(onResult, onError))
-        recognizer?.startListening(buildIntent(forWakeWord = false))
+        recognizer?.startListening(buildIntent(forWakeWord = false, preferOffline = preferOffline))
     }
 
     fun listenContinuous(onWakeWordDetected: (trailingCommand: String) -> Unit) {
@@ -170,13 +170,14 @@ class SpeechToText(private val context: Context) {
         } ?: matches.first()
     }
 
-    private fun buildIntent(forWakeWord: Boolean) = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+    private fun buildIntent(forWakeWord: Boolean, preferOffline: Boolean = false) = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-IN")
+        if (preferOffline) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         if (forWakeWord) {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
