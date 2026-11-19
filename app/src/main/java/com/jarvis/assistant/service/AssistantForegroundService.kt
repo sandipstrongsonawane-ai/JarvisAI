@@ -718,7 +718,7 @@ class AssistantForegroundService : Service() {
         }
 
         val result = try {
-            JarvisLlmClient(apiKeyProvider = { BuildConfig.GROQ_API_KEY }).chat(combined)
+            JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chat(combined)
         } catch (e: Exception) {
             null
         }
