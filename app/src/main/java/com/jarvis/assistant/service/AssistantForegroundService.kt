@@ -209,7 +209,7 @@ class AssistantForegroundService : Service() {
     fun submitText(text: String) {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
-        handleUserSpeech(trimmed)
+        handleUserSpeech(trimmed, requireVoiceAuth = false)
     }
 
 
@@ -399,13 +399,13 @@ class AssistantForegroundService : Service() {
     }
 
 
-    private fun handleUserSpeech(speech: String) {
+    private fun handleUserSpeech(speech: String, requireVoiceAuth: Boolean = true) {
         listener?.onTranscript(speech)
         try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
         listener?.onStateChanged(BrainState.THINKING)
 
         scope.launch {
-            val (resultText, fromCloud) = processSpeech(speech)
+            val (resultText, fromCloud) = processSpeech(speech, requireVoiceAuth)
 
             listener?.onStateChanged(BrainState.SPEAKING)
             listener?.onResponse(resultText, fromCloud)
@@ -586,10 +586,10 @@ class AssistantForegroundService : Service() {
         return voiceAuth.verify(sample)
     }
 
-    private suspend fun processSpeech(speech: String): Pair<String, Boolean> {
+    private suspend fun processSpeech(speech: String, requireVoiceAuth: Boolean = true): Pair<String, Boolean> {
 
         // Authenticate before confirmation, cancellation, routing, or any action execution.
-        if (!authenticateVoiceForCommand()) {
+        if (requireVoiceAuth && !authenticateVoiceForCommand()) {
             return "Voice verification failed. No command was executed. Please try again." to false
         }
 
