@@ -96,8 +96,9 @@ class VoiceAuthManager(private val context: Context) {
 
     /** Averages [samplesList]'s features into one stored voiceprint. */
     fun enrollFromSamples(samplesList: List<ShortArray>): Boolean {
-        if (samplesList.isEmpty()) return false
+        if (samplesList.isEmpty() || samplesList.any { it.size < sampleRate * 4 / 10 }) return false
         val features = samplesList.map { extractFeatures(it) }
+        if (features.any { feature -> feature.size != melBands || feature.any { !it.isFinite() } || feature.all { it == 0f } }) return false
         val avg = FloatArray(melBands)
         for (f in features) for (i in 0 until melBands) avg[i] += f[i]
         for (i in 0 until melBands) avg[i] = avg[i] / features.size.toFloat()
@@ -106,12 +107,16 @@ class VoiceAuthManager(private val context: Context) {
         return true
     }
 
-    /** True if [samples] is close enough to the enrolled voiceprint (or nothing enrolled yet). */
+    /** Fail closed unless a valid enrolled voiceprint and usable candidate are present. */
     fun verify(samples: ShortArray, threshold: Float = 0.75f): Boolean {
-        val stored = prefs.getString("voiceprint", null) ?: return true
-        val storedVec = stored.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray()
-        if (storedVec.size != melBands) return true // corrupted/legacy data — fail open
+        if (samples.size < sampleRate * 4 / 10 || !threshold.isFinite() || threshold !in -1f..1f) return false
+        val stored = prefs.getString("voiceprint", null) ?: return false
+        val values = stored.split(",")
+        if (values.size != melBands) return false
+        val storedVec = values.map { it.toFloatOrNull() ?: return false }.toFloatArray()
+        if (storedVec.any { !it.isFinite() } || storedVec.all { it == 0f }) return false
         val candidate = extractFeatures(samples)
+        if (candidate.size != melBands || candidate.any { !it.isFinite() } || candidate.all { it == 0f }) return false
         return cosineSimilarity(storedVec, candidate) >= threshold
     }
 
