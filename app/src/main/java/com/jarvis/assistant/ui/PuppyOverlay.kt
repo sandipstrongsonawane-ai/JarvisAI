@@ -6,7 +6,6 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -40,23 +39,23 @@ object PuppyOverlay : HudController.Listener {
             val p = params ?: return
             val wm = manager ?: return
             val c = context ?: return
-            val bounds = android.graphics.Rect()
-            val display = if (Build.VERSION.SDK_INT >= 30) c.display else null
-            val metrics = android.util.DisplayMetrics()
-            @Suppress("DEPRECATION")
-            if (display != null) display.getRealMetrics(metrics) else wm.defaultDisplay.getRealMetrics(metrics)
+            // Use application resource metrics; Context.display can be unavailable for
+            // an Application context on some Android builds.
+            val metrics = c.resources.displayMetrics
             val maxX = (metrics.widthPixels - v.width).coerceAtLeast(0)
-            val maxY = (metrics.heightPixels - v.height - 48).coerceAtLeast(0)
+            val maxY = (metrics.heightPixels - v.height - 48).coerceAtLeast(48)
             val targetX = Random.nextInt(0, maxX + 1)
-            val targetY = Random.nextInt(48, maxY + 49)
+            val targetY = Random.nextInt(48, maxY + 1)
+            val originX = p.x
+            val originY = p.y
             movement?.cancel()
             movement = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = Random.nextLong(2600L, 4300L)
                 interpolator = AccelerateDecelerateInterpolator()
                 addUpdateListener { a ->
                     val f = a.animatedValue as Float
-                    p.x = (p.x + (targetX - p.x) * f).toInt()
-                    p.y = (p.y + (targetY - p.y) * f).toInt()
+                    p.x = (originX + (targetX - originX) * f).toInt().coerceIn(0, maxX)
+                    p.y = (originY + (targetY - originY) * f).toInt().coerceAtLeast(0)
                     try { wm.updateViewLayout(v, p) } catch (_: Exception) { cancel() }
                 }
                 start()
