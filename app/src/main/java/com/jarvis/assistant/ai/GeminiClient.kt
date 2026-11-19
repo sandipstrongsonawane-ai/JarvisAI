@@ -160,6 +160,15 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
         }
         val target = json.optString("target", null).let { if (it == "null" || it.isNullOrBlank()) null else it }
         val message = json.optString("message", null).let { if (it == "null" || it.isNullOrBlank()) null else it }
+        if (action == "multi_step" && steps.isNullOrEmpty()) {
+            throw IllegalArgumentException("Gemini multi_step requires at least one step")
+        }
+        if (action != "multi_step" && steps != null) {
+            throw IllegalArgumentException("Only multi_step may contain steps")
+        }
+        if (steps?.any { it.action == "multi_step" } == true) {
+            throw IllegalArgumentException("Nested multi_step is not supported")
+        }
 
         return AssistantCommand(
             action = action,
