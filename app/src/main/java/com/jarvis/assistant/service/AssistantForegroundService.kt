@@ -571,6 +571,7 @@ class AssistantForegroundService : Service() {
                     onError = { if (continuation.isActive) continuation.resume("") },
                     preferOffline = true
                 )
+                continuation.invokeOnCancellation { stt.destroy() }
             }
         } ?: return false
 
