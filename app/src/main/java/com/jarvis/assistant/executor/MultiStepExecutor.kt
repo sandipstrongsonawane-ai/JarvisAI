@@ -108,6 +108,30 @@ class MultiStepExecutor(
             )
         }
 
+        // Explicit torch state followed by opening another app.
+        Regex(
+            """(?:turn\\s+)?(?:the\\s+)?(?:torch|flashlight)\\s+(on|off)\\s+(?:and then|and|phir|then)\\s+open\\s+(.+)""",
+            RegexOption.IGNORE_CASE
+        ).find(s)?.let { match ->
+            val state = if (match.groupValues[1].equals("on", true)) "torch_on" else "torch_off"
+            return listOf(
+                AssistantCommand(action = ActionType.TOGGLE_SETTING.key, target = state),
+                AssistantCommand(action = ActionType.OPEN_APP.key, target = match.groupValues[2].trim())
+            )
+        }
+
+        // Open an app first, then set the torch explicitly.
+        Regex(
+            """open\\s+(.+?)\\s+(?:and then|and|phir|then)\\s+(?:turn\\s+)?(?:the\\s+)?(?:torch|flashlight)\\s+(on|off)""",
+            RegexOption.IGNORE_CASE
+        ).find(s)?.let { match ->
+            val state = if (match.groupValues[2].equals("on", true)) "torch_on" else "torch_off"
+            return listOf(
+                AssistantCommand(action = ActionType.OPEN_APP.key, target = match.groupValues[1].trim()),
+                AssistantCommand(action = ActionType.TOGGLE_SETTING.key, target = state)
+            )
+        }
+
         // flashlight then brightness-style: torch on and ...
         if (lower.contains("torch") || lower.contains("flashlight")) {
             val steps = mutableListOf<AssistantCommand>()
