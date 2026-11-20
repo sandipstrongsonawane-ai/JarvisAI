@@ -6,7 +6,6 @@ import android.util.Log
 import com.rementia.openwakeword.lib.WakeWordEngine
 import com.rementia.openwakeword.lib.model.DetectionMode
 import com.rementia.openwakeword.lib.model.WakeWordModel
-import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,13 +17,13 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Owns the OpenWakeWord engine and verifies that its microphone/inference
- * pipeline is actually producing score heartbeats before reporting LISTENING.
+ * Owns the OpenWakeWord engine and confirms that its audio/inference pipeline
+ * is producing score heartbeats before reporting LISTENING.
  *
- * WakeWordEngine.start() launches its own recording coroutine and returns
- * immediately. Errors in that internal coroutine do not complete detections,
- * because detections is a separate hot SharedFlow. The score heartbeat is
- * therefore the health signal used to detect a dead audio pipeline.
+ * Keep the library's default recording scope: this is the constructor used by
+ * the previously working mic pipeline. The injected recording scope introduced
+ * in the all-features branch changed the AudioRecord startup path and could leave
+ * start() returning true without the device microphone actually becoming active.
  */
 class OpenWakeWordEngine(private val context: Context) {
 
@@ -33,10 +32,6 @@ class OpenWakeWordEngine(private val context: Context) {
     private var scoreJob: Job? = null
     private var watchdogJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    // The upstream library launches AudioRecord in this injected scope. Its default
-    // scope has no app callback, so AudioRecord failures otherwise disappear into
-    // an uncaught coroutine exception while start() has already returned true.
-    private var recordingScope: CoroutineScope? = null
     @Volatile private var stopping = true
     @Volatile private var lastScoreAtMs = 0L
 
@@ -66,23 +61,17 @@ class OpenWakeWordEngine(private val context: Context) {
                     threshold = 0.10f
                 )
             )
-            val audioFailureHandler = CoroutineExceptionHandler { _, error ->
-                reportFailure(error)
-            }
-            val audioScope = CoroutineScope(
-                SupervisorJob() + Dispatchers.IO + audioFailureHandler
-            )
-            recordingScope = audioScope
+            // Use the same default-scope engine construction as the known
+            // working mic branch; do not inject a replacement AudioRecord scope.
             val eng = WakeWordEngine(
                 context = context.applicationContext,
                 models = models,
                 detectionMode = DetectionMode.SINGLE_BEST,
-                detectionCooldownMs = 1500L,
-                scope = audioScope
+                detectionCooldownMs = 1500L
             )
             engine = eng
 
-            // Subscribe before start(): detections/scores are hot SharedFlows.
+            // Subscribe before start(): scores/detections are hot SharedFlows.
             scoreJob = scope.launch {
                 eng.scores.collect {
                     lastScoreAtMs = SystemClock.elapsedRealtime()
@@ -95,17 +84,12 @@ class OpenWakeWordEngine(private val context: Context) {
             detectionJob = scope.launch {
                 eng.detections.collect { detection ->
                     if (!stopping) {
-                        Log.i(
-                            TAG,
-                            "wake detected: ${detection.model.name} score=${detection.score}"
-                        )
+                        Log.i(TAG, "wake detected: ${detection.model.name} score=${detection.score}")
                         onWake()
                     }
                 }
             }
 
-            // start() only schedules the library's private recording coroutine.
-            // It does not prove that AudioRecord initialized or is still alive.
             eng.start()
             watchdogJob = scope.launch {
                 delay(INITIAL_AUDIO_TIMEOUT_MS)
@@ -140,8 +124,6 @@ class OpenWakeWordEngine(private val context: Context) {
             try { engine?.stop() } catch (_: Exception) {}
             try { engine?.release() } catch (_: Exception) {}
             engine = null
-            recordingScope?.cancel()
-            recordingScope = null
             Log.e(TAG, "start failed: ${e.message}", e)
             false
         }
@@ -153,8 +135,6 @@ class OpenWakeWordEngine(private val context: Context) {
         try { engine?.stop() } catch (_: Exception) {}
         try { engine?.release() } catch (_: Exception) {}
         engine = null
-        recordingScope?.cancel()
-        recordingScope = null
         lastScoreAtMs = 0L
     }
 
