@@ -217,21 +217,29 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
 
     private fun parseCommandJson(text: String): AssistantCommand {
         return try {
-            parseOne(JSONObject(text))
-        } catch (_: Exception) {
-            try {
-                val arr = JSONArray(text)
-                when {
-                    arr.length() >= 2 -> {
-                        val steps = (0 until arr.length()).map { parseOne(arr.getJSONObject(it)) }
-                        AssistantCommand(action = "multi_step", steps = steps)
+            val trimmed = text.trim()
+            when {
+                trimmed.startsWith("{") -> parseOne(JSONObject(trimmed))
+                trimmed.startsWith("[") -> {
+                    val arr = JSONArray(trimmed)
+                    when {
+                        arr.length() >= 2 -> {
+                            val steps = (0 until arr.length()).map { parseOne(arr.getJSONObject(it)) }
+                            AssistantCommand(action = "multi_step", steps = steps)
+                        }
+                        arr.length() == 1 -> parseOne(arr.getJSONObject(0))
+                        else -> throw IllegalArgumentException("Empty JSON array")
                     }
-                    arr.length() == 1 -> parseOne(arr.getJSONObject(0))
-                    else -> throw IllegalArgumentException("Empty JSON array")
                 }
-            } catch (e: Exception) {
-                throw IllegalArgumentException("Could not parse Gemini command JSON", e)
+                else -> throw IllegalArgumentException("Expected a JSON object or array")
             }
+        } catch (e: Exception) {
+            // Invalid or unsafe model output is a normal conversational fallback,
+            // not an uncaught exception that can break the assistant command flow.
+            AssistantCommand(
+                action = "reply",
+                message = "Could not parse Gemini command: ${e.message.orEmpty().take(180)}"
+            )
         }
     }
 
