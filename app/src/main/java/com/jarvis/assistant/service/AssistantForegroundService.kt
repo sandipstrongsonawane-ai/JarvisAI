@@ -224,8 +224,14 @@ class AssistantForegroundService : Service() {
             openWake = detector
             val started = detector.start {
                 mainHandler.post {
-                    if (!listenCycleRunning) {
+                    if (!listenCycleRunning && !externalMicSessionActive) {
                         android.util.Log.i("JarvisService", "Hey Jarvis detected by on-device KWS")
+                        // Restore the original wake-to-listen handoff: stop KWS,
+                        // publish the listening HUD/edge indicator, then open command STT.
+                        try { openWake?.stop() } catch (_: Exception) {}
+                        try { porcupine.stop() } catch (_: Exception) {}
+                        try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
+                        try { com.jarvis.assistant.ui.ActivationEdgeOverlay.show(this@AssistantForegroundService) } catch (_: Exception) {}
                         startListeningCycle()
                     }
                 }
@@ -233,8 +239,7 @@ class AssistantForegroundService : Service() {
             if (started) {
                 wakeResumeRetryAttempt = 0
                 wakeResumeRetryPosted = false
-                try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
-                android.util.Log.i("JarvisService", "On-device OpenWakeWord armed; HUD now reflects active wake listening")
+                android.util.Log.i("JarvisService", "On-device OpenWakeWord armed — waiting for Hey Jarvis")
                 return
             }
             detector.stop()
