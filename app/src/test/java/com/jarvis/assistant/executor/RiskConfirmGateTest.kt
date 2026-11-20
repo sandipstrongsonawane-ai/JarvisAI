@@ -7,6 +7,16 @@ import org.junit.Test
 
 class RiskConfirmGateTest {
     @Test
+    fun confirmationRequiresAnExactPhrase() {
+        assertTrue(RiskConfirmGate.isConfirmSpeech("yes"))
+        assertTrue(RiskConfirmGate.isConfirmSpeech("  Haan  "))
+        assertTrue(RiskConfirmGate.isConfirmSpeech("go ahead"))
+        assertFalse(RiskConfirmGate.isConfirmSpeech("yes send the message"))
+        assertFalse(RiskConfirmGate.isConfirmSpeech("confirm the payment"))
+        assertFalse(RiskConfirmGate.isConfirmSpeech("yes, please"))
+    }
+
+    @Test
     fun safeOpenAppChainDoesNotRequireSecondConfirmation() {
         val command = AssistantCommand(
             "multi_step",
