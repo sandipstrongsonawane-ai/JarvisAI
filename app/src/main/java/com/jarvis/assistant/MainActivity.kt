@@ -67,7 +67,13 @@ class MainActivity : AppCompatActivity(),
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
         if (audioGranted) {
-            startAssistantService()
+            val startWithManualListen = pendingListen
+            pendingListen = false
+            startAssistantService(
+                if (startWithManualListen)
+                    com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING
+                else null
+            )
         } else {
             pendingListen = false
             uiState = uiState.copy(response = "Microphone permission is required to use Jarvis voice features.")
@@ -245,8 +251,10 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    private fun startAssistantService() {
-        val intent = Intent(this, AssistantForegroundService::class.java)
+    private fun startAssistantService(action: String? = null) {
+        val intent = Intent(this, AssistantForegroundService::class.java).apply {
+            if (action != null) this.action = action
+        }
         startForegroundService(intent)
         bindService(intent, connection, Context.BIND_AUTO_CREATE)
     }
