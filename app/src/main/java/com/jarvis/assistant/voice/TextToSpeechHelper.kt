@@ -26,6 +26,7 @@ class TextToSpeechHelper(context: Context) {
     private var androidTts: TextToSpeech? = null
     private val androidReady = AtomicBoolean(false)
     private val androidSpeechActive = AtomicBoolean(false)
+    @Volatile private var activeAndroidUtteranceId: String? = null
     private val cloudRequestActive = AtomicBoolean(false)
     private val speechGeneration = AtomicInteger(0)
     private val cloudTts = ElevenLabsTtsClient(app)
@@ -50,17 +51,17 @@ class TextToSpeechHelper(context: Context) {
         }
         androidTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
-                androidSpeechActive.set(true)
+                if (utteranceId == activeAndroidUtteranceId) androidSpeechActive.set(true)
             }
             override fun onDone(utteranceId: String?) {
-                androidSpeechActive.set(false)
+                finishAndroidUtterance(utteranceId)
             }
             override fun onError(utteranceId: String?) {
-                androidSpeechActive.set(false)
+                finishAndroidUtterance(utteranceId)
                 Log.e(TAG, "Android TTS utterance error")
             }
             override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                androidSpeechActive.set(false)
+                finishAndroidUtterance(utteranceId)
             }
         })
     }
@@ -78,7 +79,7 @@ class TextToSpeechHelper(context: Context) {
                 try {
                     // Cancel any older cloud request before starting this utterance.
                     cloudTts.stop()
-                    try { androidTts?.stop() } catch (_: Exception) {}
+                    stopAndroidSpeech()
                     val started = cloudTts.speak(cleaned)
                     if (!started && generation == speechGeneration.get()) {
                         Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
@@ -108,19 +109,35 @@ class TextToSpeechHelper(context: Context) {
                 Log.e(TAG, "No female Android voice is installed; refusing male/default voice fallback")
                 return
             }
-            tts.stop()
+            stopAndroidSpeech()
             val id = UUID.randomUUID().toString()
+            activeAndroidUtteranceId = id
             androidSpeechActive.set(true)
             val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
             if (result == TextToSpeech.ERROR) {
-                androidSpeechActive.set(false)
+                finishAndroidUtterance(id)
                 Log.e(TAG, "Android speak ERROR")
             } else {
                 Log.i(TAG, "Spoke using female-first Android voice locale=${ReplyLanguageDetector.detect(text)}")
             }
         } catch (e: Exception) {
+            activeAndroidUtteranceId = null
+            androidSpeechActive.set(false)
             Log.e(TAG, "Android speak failed: ${e.message}", e)
         }
+    }
+
+    private fun finishAndroidUtterance(utteranceId: String?) {
+        if (utteranceId != null && utteranceId == activeAndroidUtteranceId) {
+            activeAndroidUtteranceId = null
+            androidSpeechActive.set(false)
+        }
+    }
+
+    private fun stopAndroidSpeech() {
+        activeAndroidUtteranceId = null
+        androidSpeechActive.set(false)
+        try { androidTts?.stop() } catch (_: Exception) {}
     }
 
     private fun configureAndroidVoice(text: String = ""): Boolean {
@@ -177,7 +194,7 @@ class TextToSpeechHelper(context: Context) {
         cloudRequestActive.set(false)
         androidSpeechActive.set(false)
         try { cloudTts.stop() } catch (_: Exception) {}
-        try { androidTts?.stop() } catch (_: Exception) {}
+        stopAndroidSpeech()
     }
 
     fun shutdown() {
