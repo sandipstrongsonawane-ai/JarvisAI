@@ -32,7 +32,7 @@ import org.json.JSONObject;
 public class WakeWordEngine {
 
     private static final String TAG = "WakeWordEngine";
-    private static final String MEL_MODEL = "voicute/melspectrogram.onnx";
+    private static final String MEL_MODEL = "melspectrogram.onnx";
 
     // Audio parameters (constant)
     static final int SAMPLE_RATE = 16000;
