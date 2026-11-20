@@ -226,6 +226,8 @@ class AssistantForegroundService : Service() {
                 onWake = {
                     mainHandler.post {
                         if (!listenCycleRunning && !externalMicSessionActive) {
+                            wakeResumeRetryAttempt = 0
+                            wakeResumeRetryPosted = false
                             android.util.Log.i("JarvisService", "Hey Jarvis detected by on-device KWS")
                             try { openWake?.stop() } catch (_: Exception) {}
                             try { porcupine.stop() } catch (_: Exception) {}
@@ -248,8 +250,6 @@ class AssistantForegroundService : Service() {
                 }
             )
             if (started) {
-                wakeResumeRetryAttempt = 0
-                wakeResumeRetryPosted = false
                 android.util.Log.i("JarvisService", "On-device OpenWakeWord armed — waiting for Hey Jarvis")
                 return
             }
