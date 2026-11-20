@@ -190,14 +190,22 @@ class JarvisAccessibilityService : AccessibilityService() {
         val expected = expectedRecipient.trim()
         val text = node.text?.toString().orEmpty()
         val description = node.contentDescription?.toString().orEmpty()
-        if (text.contains(expected, ignoreCase = true) ||
-            description.contains(expected, ignoreCase = true)
-        ) return true
-        val expectedDigits = expected.filter(Char::isDigit)
-        if (expectedDigits.length >= 7) {
-            val expectedTail = expectedDigits.takeLast(10)
-            val nodeDigits = (text + " " + description).filter(Char::isDigit)
-            if (nodeDigits.contains(expectedTail)) return true
+        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
+        // Match only chat-header/title nodes, never a coincidental mention in message text.
+        val isChatHeader = viewId.contains("conversation_contact_name") ||
+            viewId.contains("action_bar_title") ||
+            viewId.contains("chat_title") ||
+            viewId.contains("toolbar_title")
+        if (isChatHeader) {
+            if (text.contains(expected, ignoreCase = true) ||
+                description.contains(expected, ignoreCase = true)
+            ) return true
+            val expectedDigits = expected.filter(Char::isDigit)
+            if (expectedDigits.length >= 7) {
+                val expectedTail = expectedDigits.takeLast(10)
+                val headerDigits = (text + " " + description).filter(Char::isDigit)
+                if (headerDigits.contains(expectedTail)) return true
+            }
         }
         for (i in 0 until node.childCount) {
             node.getChild(i)?.let { child ->
