@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, master, 'feature/build-286-groq-gemini-runtime-keys' ]
+    branches: [ main, master, 'feature/build-286-groq-gemini-runtime-keys', 'feature/background-listening-rebuild' ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
