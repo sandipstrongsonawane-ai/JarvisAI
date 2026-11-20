@@ -30,7 +30,6 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"\"")
         buildConfigField("String", "OPENWEATHER_API_KEY", "\"\"")
         buildConfigField("String", "GROQ_API_KEY", "\"\"")
-        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"\"")
         buildConfigField("String", "ELEVENLABS_API_KEY", "\"\"")
         // Optional: Voices → copy ID from https://elevenlabs.io/app/voice-library
         buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"\"")
@@ -56,8 +55,8 @@ android {
     }
     packaging {
         jniLibs {
-            // sherpa-onnx and the existing wake-word stack both bundle ONNX Runtime.
-            // Keep one shared runtime copy in the APK instead of failing native merge.
+            // sherpa-onnx and Voicute share ONNX Runtime in the APK.
+            // Keep one shared runtime copy instead of failing native merge.
             pickFirsts += "**/libonnxruntime.so"
         }
         resources {
@@ -79,7 +78,6 @@ android {
 
 dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
-    implementation("xyz.rementia:openwakeword:0.1.5")
     implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
         // The Android AAR already contains the sherpa JVM API classes.
         // Exclude the separately published JVM JAR to prevent duplicate classes.
@@ -100,7 +98,6 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    implementation("ai.picovoice:porcupine-android:3.0.3")
 
     implementation("androidx.camera:camera-core:1.3.4")
     implementation("androidx.camera:camera-camera2:1.3.4")

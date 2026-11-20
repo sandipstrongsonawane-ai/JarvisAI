@@ -38,7 +38,7 @@ import java.util.Calendar
 import com.jarvis.assistant.ai.JarvisLlmClient
 
 /**
- * Always-alive foreground service. Wake-word detection (Porcupine) should call
+ * Always-alive foreground service. The Voicute on-device wake engine calls
  * startListeningCycle() on wake, rather than this service polling continuously —
  * continuous SpeechRecognizer usage will drain battery fast and Android will kill it.
  *
@@ -50,7 +50,6 @@ import com.jarvis.assistant.ai.JarvisLlmClient
 class AssistantForegroundService : Service() {
 
     private lateinit var stt: SpeechToText
-    private lateinit var clapDetector: com.jarvis.assistant.voice.ClapDetector
     private var callAnnouncer: com.jarvis.assistant.util.IncomingCallAnnouncer? = null
     private lateinit var tts: TextToSpeechHelper
     private lateinit var executor: CommandExecutor
@@ -99,13 +98,6 @@ class AssistantForegroundService : Service() {
         stt = SpeechToText(this)
         // Hard stop any residual continuous STT from previous process death
         try { stt.stopContinuous() } catch (_: Exception) {}
-        clapDetector = com.jarvis.assistant.voice.ClapDetector()
-        val smBoot = com.jarvis.assistant.util.SettingsManager(this)
-        // Mic must NOT open until clap / Porcupine wake / explicit Listen button.
-        // Clap wake is OFF by default so AudioRecord does not hold the mic at boot.
-        // Clap wake disabled — continuous mic not allowed in background
-        android.util.Log.i("JarvisService", "Clap wake skipped (no background mic)")
-        try { clapDetector.stop() } catch (_: Exception) {}
         tts = TextToSpeechHelper(this)
         callAnnouncer = com.jarvis.assistant.util.IncomingCallAnnouncer(this) { tts }
         try { callAnnouncer?.start() } catch (_: Exception) {}
@@ -154,7 +146,7 @@ class AssistantForegroundService : Service() {
     }
 
 
-    /** Stop every continuous mic owner (OpenWakeWord, Porcupine, Google STT continuous). */
+    /** Stop the command STT and Voicute mic before switching microphone ownership. */
     private fun scheduleWakeRetry() {
         val sm = SettingsManager(this)
         if (wakeRetryPending || listenCycleRunning ||
@@ -172,7 +164,6 @@ class AssistantForegroundService : Service() {
         try { voicuteWake?.stop() } catch (_: Exception) {}
         
         try { stt.stopContinuous() } catch (_: Exception) {}
-        try { clapDetector.stop() } catch (_: Exception) {}
     }
 
     /**
@@ -267,7 +258,7 @@ class AssistantForegroundService : Service() {
     private fun resumeWakeSoon(delayMs: Long = 1800L) {
         mainHandler.postDelayed({
             try {
-                // Critical: Google STT must be fully stopped before OpenWakeWord takes AudioRecord
+                // Critical: Google STT must be fully stopped before Voicute reacquires AudioRecord
                 forceReleaseCommandMic()
                 // Small gap so AudioRecord is free
                 mainHandler.postDelayed({
