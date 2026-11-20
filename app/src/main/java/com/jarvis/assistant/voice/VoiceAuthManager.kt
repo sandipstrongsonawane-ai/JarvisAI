@@ -28,6 +28,9 @@ class VoiceAuthManager(private val context: Context) {
     // across three samples while avoiding an overly strict single fixed threshold.
     private val enrollmentThreshold = 0.45f
     private val verificationThreshold = 0.50f
+    @Volatile private var lastEnrollmentFailure: String? = null
+
+    fun lastEnrollmentFailureReason(): String? = lastEnrollmentFailure
 
     fun isEnabled(): Boolean = prefs.getBoolean("enabled", false)
     fun setEnabled(enabled: Boolean) = prefs.edit().putBoolean("enabled", enabled).apply()
@@ -100,34 +103,53 @@ class VoiceAuthManager(private val context: Context) {
     suspend fun enrollFromSamples(samples: List<ShortArray>): Boolean = withContext(Dispatchers.Default) {
         // Settings enrollment records three independent utterances. Do not silently
         // accept a partial enrollment or average embeddings from inconsistent speakers.
-        if (samples.size < 3 || samples.any { it.size < sampleRate * 12 / 10 }) return@withContext false
+        lastEnrollmentFailure = null
+        if (samples.size < 3) {
+            lastEnrollmentFailure = "Three separate voice samples are required."
+            return@withContext false
+        }
+        if (samples.any { it.size < sampleRate * 12 / 10 }) {
+            lastEnrollmentFailure = "One or more samples were too short. Please repeat the enrollment."
+            return@withContext false
+        }
         val vectors = samples.mapIndexed { index, sample ->
             val vector = embedding(sample)
             if (vector == null) {
                 android.util.Log.e("JarvisVoiceAuth", "Enrollment embedding failed for sample ${index + 1}")
+                lastEnrollmentFailure = "Voice model could not process sample ${index + 1}. Check mic level and retry."
                 return@withContext false
             }
             vector
         }
         val dimension = vectors.first().size
-        if (dimension <= 0 || vectors.any { it.size != dimension }) return@withContext false
+        if (dimension <= 0 || vectors.any { it.size != dimension }) {
+            lastEnrollmentFailure = "Voice model returned inconsistent sample data."
+            return@withContext false
+        }
         for (i in vectors.indices) {
             for (j in i + 1 until vectors.size) {
                 val similarity = cosineSimilarity(vectors[i], vectors[j])
                 android.util.Log.i("JarvisVoiceAuth", "Enrollment similarity sample ${i + 1}-${j + 1}=$similarity threshold=$threshold")
-                if (similarity < enrollmentThreshold) return@withContext false
+                if (similarity < enrollmentThreshold) {
+                    lastEnrollmentFailure = "Samples differ too much (similarity $similarity). Keep the same distance and speak naturally for each sample."
+                    return@withContext false
+                }
             }
         }
         // Keep each independent enrollment sample. Verification uses majority
         // agreement across these stored speaker embeddings instead of one average.
         val encoded = SpeakerEmbeddingMatcher.encode(vectors, enrollmentThreshold)
-            ?: return@withContext false
+            ?: run {
+                lastEnrollmentFailure = "Could not build a stable voice profile from these samples."
+                return@withContext false
+            }
         try {
             secureStore.put("voice_embedding", encoded)
             prefs.edit().remove("voice_embedding").remove("voiceprint").apply()
             true
         } catch (e: Exception) {
             android.util.Log.e("JarvisVoiceAuth", "Could not encrypt enrolled speaker template", e)
+            lastEnrollmentFailure = "Could not save the encrypted voice profile: " + (e.message ?: "storage error")
             false
         }
     }
