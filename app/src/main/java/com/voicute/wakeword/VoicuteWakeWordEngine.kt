@@ -45,8 +45,11 @@ class VoicuteWakeWordEngine(context: Context) {
 
         inferenceThread = Thread({
             try {
-                Thread.sleep(500L)
                 while (running && !Thread.currentThread().isInterrupted) {
+                    if (activeCapture.getSamplesAvailable() < activeEngine.audioSamplesNeeded) {
+                        Thread.sleep(10L)
+                        continue
+                    }
                     val startedAt = System.currentTimeMillis()
                     val chunk = activeCapture.readChunk(
                         activeCapture.ringPos,
