@@ -304,6 +304,8 @@ class AssistantForegroundService : Service() {
         lastListenCycleMs = now
         listenCycleRunning = true
 
+        // A manual tap interrupts any current TTS reply and takes control immediately.
+        try { tts.stop() } catch (_: Exception) {}
         // Hold wake engines OFF for entire command window
         try { openWake?.stop() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
@@ -419,7 +421,9 @@ class AssistantForegroundService : Service() {
                 resultText
             }
             tts.speak(speechText)
-            listener?.onStateChanged(BrainState.IDLE)
+            // Stay in the active conversation state; do not show standby between
+            // consecutive commands. Follow-up STT below keeps the session alive.
+            // A tap on the puppy interrupts TTS and opens a fresh listening cycle.
             // Siri-level: after speaking, one follow-up listen (no second Hey Jarvis), then wake
             mainHandler.postDelayed({
                 if (!listenCycleRunning) startFollowUpListen()
