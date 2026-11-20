@@ -88,6 +88,8 @@ class AssistantForegroundService : Service() {
         const val CHANNEL_ID = "jarvis_channel"
         const val NOTIF_ID = 101
         const val ACTION_EXECUTE_DEFERRED_COMMAND = "com.jarvis.assistant.EXECUTE_DEFERRED_COMMAND"
+        const val ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC = "com.jarvis.assistant.PAUSE_WAKE_FOR_EXTERNAL_MIC"
+        const val ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC = "com.jarvis.assistant.RESUME_WAKE_AFTER_EXTERNAL_MIC"
     }
 
     override fun onCreate() {
@@ -134,6 +136,18 @@ class AssistantForegroundService : Service() {
             return START_NOT_STICKY
         }
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
+        when (intent?.action) {
+            ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC -> {
+                releaseAllMics()
+                android.util.Log.i("JarvisService", "Wake microphone paused for an external capture session")
+                return START_STICKY
+            }
+            ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC -> {
+                startWakeWordListening()
+                android.util.Log.i("JarvisService", "Wake microphone resumed after external capture session")
+                return START_STICKY
+            }
+        }
         if (intent?.action == ACTION_EXECUTE_DEFERRED_COMMAND) {
             releaseAllMics()
             val action = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION).orEmpty()
