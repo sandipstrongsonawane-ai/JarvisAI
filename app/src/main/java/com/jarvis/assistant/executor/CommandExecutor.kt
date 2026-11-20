@@ -173,9 +173,10 @@ class CommandExecutor(private val context: Context) {
                 )
             )
         }
+        val requestId = 9200 + (command.action + command.target.orEmpty() + command.message.orEmpty()).hashCode().and(0x7fff)
         val pending = android.app.PendingIntent.getActivity(
             context,
-            9200 + command.action.hashCode().and(0x7fff),
+            requestId,
             request,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
@@ -191,7 +192,7 @@ class CommandExecutor(private val context: Context) {
             .setAutoCancel(true)
             .setContentIntent(pending)
             .build()
-        manager.notify(9200 + command.action.hashCode().and(0x7fff), notification)
+        manager.notify(requestId, notification)
     }
 
     private fun requiredRuntimePermissions(command: AssistantCommand): List<String> {
