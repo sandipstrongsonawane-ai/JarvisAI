@@ -86,9 +86,10 @@ class DetectionLogic {
         // The classifier labels scores >0.5 as a candidate, but the runtime
         // trigger threshold is 0.55. Treat sub-threshold candidates as background
         // so they do not disappear from the adaptive noise estimate.
-        if (word == null || word.isEmpty()) {
-            bg = bg * 0.995f + prob * 0.005f;
-        } else if (prob < 0.55f) {
+        if (prob < 0.55f || word == null || word.isEmpty()) {
+            // The model returns a null label for scores <= 0.5. Cap those too:
+            // otherwise sustained 0.4–0.5 background scores can raise bg so high
+            // that the L2 peak > 3x background test becomes mathematically impossible.
             // Candidate band is below the trigger threshold. Track it, but cap
             // its contribution so repeated near-threshold noise cannot raise bg
             // above one-third of a valid trigger score and permanently block L2.
