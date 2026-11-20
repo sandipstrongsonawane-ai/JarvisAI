@@ -26,15 +26,14 @@ android {
             abiFilters += "arm64-v8a"
         }
 
-        // Gemini / OpenWeather / Groq / Picovoice / ElevenLabs (human TTS)
-        // Set in local.properties OR export as env vars / GitHub Actions secrets
-        buildConfigField("String", "GEMINI_API_KEY", "\"\"\"")
-        buildConfigField("String", "OPENWEATHER_API_KEY", "\"\"\"")
-        buildConfigField("String", "GROQ_API_KEY", "\"\"\"")
-        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"\"\"")
-        buildConfigField("String", "ELEVENLABS_API_KEY", "\"\"\"")
+        // Compatibility constants are empty; provider secrets are loaded from encrypted runtime storage.
+        buildConfigField("String", "GEMINI_API_KEY", "\"\"")
+        buildConfigField("String", "OPENWEATHER_API_KEY", "\"\"")
+        buildConfigField("String", "GROQ_API_KEY", "\"\"")
+        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"\"")
+        buildConfigField("String", "ELEVENLABS_API_KEY", "\"\"")
         // Optional: Voices → copy ID from https://elevenlabs.io/app/voice-library
-        buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"\"\"")
+        buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"\"")
     }
 
     buildTypes {
