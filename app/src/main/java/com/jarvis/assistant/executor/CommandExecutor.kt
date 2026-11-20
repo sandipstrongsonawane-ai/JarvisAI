@@ -425,40 +425,19 @@ class CommandExecutor(private val context: Context) {
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
         )
         return try {
-            val likeHit = resolver.query(
-                uri, projection,
-                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
-                arrayOf("%$q%"),
-                null
-            )?.use { c ->
-                if (c.moveToFirst()) c.getString(0) else null
-            }
-            if (!likeHit.isNullOrBlank()) return likeHit
-
             resolver.query(uri, projection, null, null, null)?.use { c ->
                 val numIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 val nameIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
                 if (numIdx < 0 || nameIdx < 0) return@use null
-                val ql = q.lowercase()
-                var exact: String? = null
-                var starts: String? = null
-                var contains: String? = null
-                var tokenHit: String? = null
+                val contacts = mutableListOf<ContactMatchResolver.Contact>()
                 while (c.moveToNext()) {
-                    val display = c.getString(nameIdx)?.trim() ?: continue
-                    val number = c.getString(numIdx) ?: continue
-                    val d = display.lowercase()
-                    when {
-                        d == ql -> { exact = number; break }
-                        starts == null && (d.startsWith(ql) || ql.startsWith(d)) -> starts = number
-                        contains == null && (d.contains(ql) || ql.contains(d)) -> contains = number
-                    }
-                    val tokens = ql.split(Regex("\\s+")).filter { it.length >= 2 }
-                    if (tokenHit == null && tokens.isNotEmpty() && tokens.all { d.contains(it) }) {
-                        tokenHit = number
+                    val display = c.getString(nameIdx)?.trim().orEmpty()
+                    val number = c.getString(numIdx)?.trim().orEmpty()
+                    if (display.isNotBlank() && number.isNotBlank()) {
+                        contacts += ContactMatchResolver.Contact(display, number)
                     }
                 }
-                exact ?: starts ?: tokenHit ?: contains
+                ContactMatchResolver.resolve(q, contacts)
             }
         } catch (_: SecurityException) {
             null
