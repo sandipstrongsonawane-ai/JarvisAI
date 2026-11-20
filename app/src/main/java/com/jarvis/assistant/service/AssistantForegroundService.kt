@@ -226,7 +226,7 @@ class AssistantForegroundService : Service() {
     private fun resumeWakeSoon(delayMs: Long = 1800L) {
         mainHandler.postDelayed({
             try {
-                // Critical: Google STT must be fully stopped before Voicute reacquires AudioRecord
+                // Critical: Google STT must be fully stopped before the wake detector reacquires AudioRecord
                 forceReleaseCommandMic()
                 // Small gap so AudioRecord is free
                 mainHandler.postDelayed({
@@ -860,8 +860,6 @@ class AssistantForegroundService : Service() {
         // Prevent late IO/start callbacks or command coroutines from reviving work
         // after Android has destroyed this foreground service.
         scope.cancel()
-        try { openWake?.stop() } catch (_: Exception) {}
-        try { porcupine.stop() } catch (_: Exception) {}
         try { callAnnouncer?.stop() } catch (_: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
         proactive?.stop()
