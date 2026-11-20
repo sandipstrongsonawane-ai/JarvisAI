@@ -579,9 +579,13 @@ class AssistantForegroundService : Service() {
                 android.util.Log.w("JarvisService", "TTS completion timed out; stopping playback before listening")
                 tts.stop()
             }
-            // Restore the existing short follow-up command capture after every reply.
-            // If the user does not speak, its error/empty path returns to OpenWakeWord standby.
-            if (!listenCycleRunning) startFollowUpListen()
+            // Return directly to the always-on wake detector after TTS.
+            // Do not open a one-shot SpeechRecognizer here: it owns AudioRecord and
+            // prevents OpenWakeWord from hearing the wake phrase while it is pending.
+            if (!externalMicSessionActive) {
+                android.util.Log.i("JarvisService", "Reply complete; returning directly to OpenWakeWord standby")
+                resumeWakeSoon(500L)
+            }
         }
     }
 
