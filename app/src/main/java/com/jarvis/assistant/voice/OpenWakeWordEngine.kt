@@ -6,6 +6,7 @@ import android.util.Log
 import com.rementia.openwakeword.lib.WakeWordEngine
 import com.rementia.openwakeword.lib.model.DetectionMode
 import com.rementia.openwakeword.lib.model.WakeWordModel
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +33,10 @@ class OpenWakeWordEngine(private val context: Context) {
     private var scoreJob: Job? = null
     private var watchdogJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // The upstream library launches AudioRecord in this injected scope. Its default
+    // scope has no app callback, so AudioRecord failures otherwise disappear into
+    // an uncaught coroutine exception while start() has already returned true.
+    private var recordingScope: CoroutineScope? = null
     @Volatile private var stopping = true
     @Volatile private var lastScoreAtMs = 0L
 
@@ -61,11 +66,19 @@ class OpenWakeWordEngine(private val context: Context) {
                     threshold = 0.10f
                 )
             )
+            val audioFailureHandler = CoroutineExceptionHandler { _, error ->
+                reportFailure(error)
+            }
+            val audioScope = CoroutineScope(
+                SupervisorJob() + Dispatchers.IO + audioFailureHandler
+            )
+            recordingScope = audioScope
             val eng = WakeWordEngine(
                 context = context.applicationContext,
                 models = models,
                 detectionMode = DetectionMode.SINGLE_BEST,
-                detectionCooldownMs = 1500L
+                detectionCooldownMs = 1500L,
+                scope = audioScope
             )
             engine = eng
 
@@ -127,6 +140,8 @@ class OpenWakeWordEngine(private val context: Context) {
             try { engine?.stop() } catch (_: Exception) {}
             try { engine?.release() } catch (_: Exception) {}
             engine = null
+            recordingScope?.cancel()
+            recordingScope = null
             Log.e(TAG, "start failed: ${e.message}", e)
             false
         }
@@ -138,6 +153,8 @@ class OpenWakeWordEngine(private val context: Context) {
         try { engine?.stop() } catch (_: Exception) {}
         try { engine?.release() } catch (_: Exception) {}
         engine = null
+        recordingScope?.cancel()
+        recordingScope = null
         lastScoreAtMs = 0L
     }
 
