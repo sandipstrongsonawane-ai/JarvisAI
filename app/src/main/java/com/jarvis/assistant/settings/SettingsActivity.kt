@@ -568,22 +568,43 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Enrolling — say a short phrase 3 times when prompted.")
+        toast("Enrolling — say: Jarvis, meri awaaz pehchano")
         scope.launch {
             val samples = mutableListOf<ShortArray>()
-            repeat(3) { i ->
-                toast("Sample ${i + 1} of 3 — speak now…")
-                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(1800) }
-                if (sample != null) samples.add(sample)
+            val enrollmentPhrase = "Jarvis, meri awaaz pehchano"
+            val prompts = listOf(
+                "First sample. Say: $enrollmentPhrase",
+                "Second sample. Repeat exactly: $enrollmentPhrase",
+                "Final sample. Repeat exactly: $enrollmentPhrase"
+            )
+            for (i in prompts.indices) {
+                tts.speak(prompts[i])
+                val promptFinished = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                    while (tts.isSpeaking()) kotlinx.coroutines.delay(100L)
+                    true
+                } ?: false
+                if (!promptFinished) {
+                    tts.stop()
+                    toast("Voice prompt did not finish. Please retry enrollment.")
+                    return@launch
+                }
+                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(5000) }
+                if (sample == null) {
+                    toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
+                    return@launch
+                }
+                samples += sample
+                kotlinx.coroutines.delay(500L)
             }
-            if (samples.size < 2) {
-                toast("Didn't capture enough audio — try again somewhere quieter.")
+            val enrolled = voiceAuth.enrollFromSamples(samples)
+            if (!enrolled) {
+                toast(voiceAuth.lastEnrollmentFailureReason() ?: "Voice samples did not match reliably. Keep the phone 15–20 cm away and repeat the exact phrase.")
                 return@launch
             }
-            voiceAuth.enrollFromSamples(samples)
             voiceAuth.setEnabled(true)
             voiceAuthStatus.text = voiceAuthStatusText()
-            toast("Voice enrolled and voice lock enabled.")
+            toast("Neural voice enrolled and voice lock enabled.")
+            tts.speak("Voice enrollment complete. Voice lock is now enabled.")
         }
     }
 
