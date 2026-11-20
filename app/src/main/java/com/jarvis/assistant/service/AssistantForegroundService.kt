@@ -71,11 +71,12 @@ class AssistantForegroundService : Service() {
             mainHandler.postDelayed(this, 5 * 60_000L)
         }
     }
+    @Volatile private var serviceDestroyed = false
     private var wakeRetryAttempt = 0
     private var wakeRetryPending = false
     private val wakeRetryRunnable = Runnable {
         wakeRetryPending = false
-        if (!isDestroyed && !listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
+        if (!serviceDestroyed && !listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
     }
 
     var listener: AssistantListener? = null
@@ -199,7 +200,7 @@ class AssistantForegroundService : Service() {
 
         val onWake: () -> Unit = {
             mainHandler.post {
-                if (!isDestroyed && !listenCycleRunning) {
+                if (!serviceDestroyed && !listenCycleRunning) {
                     android.util.Log.i("JarvisService", "On-device wake detected — opening command STT")
                     try { voicuteWake?.stop() } catch (_: Exception) {}
                     
@@ -215,7 +216,7 @@ class AssistantForegroundService : Service() {
             val voicuteStarted = try {
                 val started = voicuteWake?.start(onWake) {
                     mainHandler.post {
-                        if (!isDestroyed) {
+                        if (!serviceDestroyed) {
                             wakeStartInProgress = false
                             if (!listenCycleRunning) scheduleWakeRetry()
                         }
@@ -227,7 +228,7 @@ class AssistantForegroundService : Service() {
                 false
             }
             mainHandler.post {
-                if (isDestroyed) return@post
+                if (serviceDestroyed) return@post
                 wakeStartInProgress = false
                 if (voicuteStarted) {
                     wakeRetryAttempt = 0
@@ -883,6 +884,7 @@ class AssistantForegroundService : Service() {
     override fun onDestroy() {
         // Prevent late IO/start callbacks or command coroutines from reviving work
         // after Android has destroyed this foreground service.
+        serviceDestroyed = true
         scope.cancel()
         try { voicuteWake?.stop() } catch (_: Exception) {}
         try { callAnnouncer?.stop() } catch (_: Exception) {}
