@@ -22,23 +22,11 @@ object VoiceChallenge {
             .filter { it.isNotBlank() }
         val expectedWords = tokens(expected)
         val heardWords = tokens(transcript)
-        if (expectedWords.size != 4 || heardWords.isEmpty()) return false
+        if (expectedWords.size != 4 || heardWords.size != 4) return false
 
-        // Offline ASR can substitute or drop one word. Permit one token edit while
-        // preserving order and the remaining three unpredictable challenge words.
-        val dp = Array(expectedWords.size + 1) { IntArray(heardWords.size + 1) }
-        for (i in 0..expectedWords.size) dp[i][0] = i
-        for (j in 0..heardWords.size) dp[0][j] = j
-        for (i in 1..expectedWords.size) {
-            for (j in 1..heardWords.size) {
-                val cost = if (expectedWords[i - 1] == heardWords[j - 1]) 0 else 1
-                dp[i][j] = minOf(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + cost
-                )
-            }
-        }
-        return dp[expectedWords.size][heardWords.size] <= 1
+        // Offline ASR may substitute one English word. Keep word count and order
+        // fixed so extra/missing words cannot satisfy the random challenge.
+        val mismatches = expectedWords.indices.count { expectedWords[it] != heardWords[it] }
+        return mismatches <= 1
     }
 }
