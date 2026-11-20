@@ -368,18 +368,8 @@ class AssistantForegroundService : Service() {
             android.widget.Toast.makeText(this, "Listening…", android.widget.Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
 
-        // Siri-style ack — then wait for TTS before STT (long listen window still applies)
-        val ack = try {
-            val sm = SettingsManager(this)
-            val name = sm.getUserName().trim().lowercase()
-            when {
-                name in listOf("ma'am", "madam", "mam", "miss", "mrs", "ms") -> "Yes ma'am"
-                name.endsWith("a") || name in listOf("priya", "neha", "anjali", "riya", "shreya", "kavya") -> "Yes ma'am"
-                else -> "Yes sir"
-            }
-        } catch (_: Exception) {
-            "Yes sir"
-        }
+        // Personal wake acknowledgement — always address the user as Sagar.
+        val ack = "Ji Sagar"
         try { voicuteWake?.stop() } catch (_: Exception) {}
         
         try { tts.speak(ack) } catch (_: Exception) {}
@@ -406,7 +396,9 @@ class AssistantForegroundService : Service() {
                         listenCycleRunning = false
                         try { stt.stopContinuous() } catch (_: Exception) {}
                         val s = speech.trim()
-                        val echo = s.equals("yes sir", true) ||
+                        val echo = s.equals("ji sagar", true) ||
+                            s.equals("jee sagar", true) ||
+                            s.equals("yes sir", true) ||
                             s.equals("yes ma'am", true) ||
                             s.equals("yes mam", true) ||
                             s.equals("yes", true) ||
@@ -445,7 +437,7 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // After Yes sir finishes, open long STT window
+        // After “Ji Sagar” finishes, open the long STT window
         mainHandler.postDelayed({ beginStt(false) }, 1600L)
     }
 
