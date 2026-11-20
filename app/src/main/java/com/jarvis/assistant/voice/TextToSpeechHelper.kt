@@ -104,12 +104,11 @@ class TextToSpeechHelper(context: Context) {
             return
         }
         try {
+            stopAndroidSpeech()
             if (!configureAndroidVoice(text)) {
-                androidSpeechActive.set(false)
                 Log.e(TAG, "No female Android voice is installed; refusing male/default voice fallback")
                 return
             }
-            stopAndroidSpeech()
             val id = UUID.randomUUID().toString()
             activeAndroidUtteranceId = id
             androidSpeechActive.set(true)
