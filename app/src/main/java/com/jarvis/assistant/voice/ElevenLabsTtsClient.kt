@@ -17,12 +17,12 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Cloud TTS via ElevenLabs — natural / cinematic Jarvis-style voice.
+ * Cloud TTS via ElevenLabs — natural female voice for Jarvis.
  *
  * Free tier: https://elevenlabs.io → API key in local.properties as ELEVENLABS_API_KEY
  * Optional: ELEVENLABS_VOICE_ID (dashboard → Voices → copy ID)
  *
- * Default voice is a deep male stock voice suitable for JARVIS tone.
+ * The selected female voice is the default. An explicit custom voice ID can override it.
  */
 class ElevenLabsTtsClient(private val context: Context) {
 
@@ -41,9 +41,7 @@ class ElevenLabsTtsClient(private val context: Context) {
 
     private val settings = SettingsManager(context)
 
-    /** Female preference always uses a distinct known-good voice; male keeps
-     *  any custom BuildConfig override (from local.properties / CI secret),
-     *  falling back to the stock male voice if none was set. */
+    /** Female voice is the default; an explicit custom BuildConfig voice ID remains supported. */
     private val voiceId: String
         get() {
             val override = BuildConfig.ELEVENLABS_VOICE_ID.trim()
@@ -159,9 +157,9 @@ class ElevenLabsTtsClient(private val context: Context) {
         private const val BASE_URL = "https://api.elevenlabs.io/v1"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
-        /** Deep male stock voice (Adam) — override with ELEVENLABS_VOICE_ID */
+        /** Original selected female voice supplied by the user. */
+        const val FEMALE_VOICE_ID = "RABOvaPec1ymXz02oDQi"
+        /** Legacy stock male voice ID retained for compatibility only. */
         const val DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
-        /** Well-known ElevenLabs premade female voice (Rachel) */
-        const val FEMALE_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
     }
 }
