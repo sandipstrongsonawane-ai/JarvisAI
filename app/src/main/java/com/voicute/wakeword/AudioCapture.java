@@ -29,6 +29,7 @@ public class AudioCapture {
     private final int ringSize = SAMPLE_RATE * 3;
     private final short[] ringBuffer;
     private volatile int ringPos;
+    private volatile int samplesAvailable;
 
     private AudioRecord recorder;
     private NoiseSuppressor noiseSuppressor;
@@ -50,6 +51,9 @@ public class AudioCapture {
 
     /** Ring buffer write position (for inference thread to snapshot). */
     public int getRingPos() { return ringPos; }
+
+    /** Number of real microphone samples currently available in the ring buffer. */
+    public int getSamplesAvailable() { return samplesAvailable; }
 
     /**
      * Read the most recent `samplesNeeded` samples from the ring buffer.
@@ -83,6 +87,7 @@ public class AudioCapture {
         running = true;
         alive = false;
         ringPos = 0;
+        samplesAvailable = 0;
         CountDownLatch signal = new CountDownLatch(1);
         startSignal = signal;
         captureThread = new Thread(this::captureLoop, "AudioCapture");
@@ -211,6 +216,7 @@ public class AudioCapture {
                     ringBuffer[ringPos] = readChunk[i];
                     ringPos = (ringPos + 1) % ringSize;
                 }
+                samplesAvailable = Math.min(ringSize, samplesAvailable + read);
 
                 // Track RMS for silence detection and activity monitoring
                 float rms = rmsOf(readChunk, read);
