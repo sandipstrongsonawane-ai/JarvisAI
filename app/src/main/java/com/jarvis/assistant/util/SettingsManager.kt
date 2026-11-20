@@ -7,6 +7,10 @@ import android.content.Context
  */
 class SettingsManager(context: Context) {
 
+    companion object {
+        const val DEFAULT_ELEVENLABS_VOICE_ID = "RABOvaPec1ymXz02oDQi"
+    }
+
     private val prefs = context.getSharedPreferences("jarvis_settings", Context.MODE_PRIVATE)
     private val secureApiKeys = SecureApiKeyStore(context)
 
@@ -70,6 +74,18 @@ class SettingsManager(context: Context) {
     fun setElevenLabsApiKey(value: String) {
         secureApiKeys.put("elevenlabs", value)
         if (value.isNotBlank()) setPreferCloudVoice(true)
+    }
+
+    fun getElevenLabsVoiceId(): String =
+        secureApiKeys.get("elevenlabs_voice_id")
+            ?.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{8,64}$")) }
+            ?: DEFAULT_ELEVENLABS_VOICE_ID
+
+    fun setElevenLabsVoiceId(value: String) {
+        val normalized = value.trim()
+        if (normalized.matches(Regex("^[A-Za-z0-9_-]{8,64}$"))) {
+            secureApiKeys.put("elevenlabs_voice_id", normalized)
+        }
     }
 
     fun getOpenWeatherApiKey(): String = secureApiKeys.get("openweather") ?: ""
