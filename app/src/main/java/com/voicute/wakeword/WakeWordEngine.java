@@ -112,8 +112,6 @@ public class WakeWordEngine {
     private String errorMessage = null;
     private int debugLogCount = 0;
     private static final int DEBUG_LOG_MAX = 50;
-    private long engineStartTime = System.currentTimeMillis();
-    private static final long STARTUP_SKIP_MS = 3000;  // skip first 3s to avoid cold-start FP
 
     public WakeWordEngine(Context context) {
         env = OrtEnvironment.getEnvironment();
@@ -287,9 +285,9 @@ public class WakeWordEngine {
                 }
             }
 
-            // 4. Prepare classifier input with hidden zero-channel padding
-            // Skip first 3s to avoid cold-start false triggers
-            if (System.currentTimeMillis() - engineStartTime < STARTUP_SKIP_MS) return null;
+            // 4. Prepare classifier input with hidden zero-channel padding.
+            // AudioCapture only calls inference after a full real-audio window is buffered;
+            // DetectionLogic handles confidence and false-trigger filtering.
 
             int melStart = Math.max(0, frames - dscnnMelTime);
             float[][][] dscnnInput = new float[1][dscnnMelTime][inputMels];
