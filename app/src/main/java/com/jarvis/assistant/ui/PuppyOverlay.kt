@@ -50,8 +50,10 @@ object PuppyOverlay : HudController.Listener {
             val originX = p.x
             val originY = p.y
             movement?.cancel()
+            // 60% slower means each travel takes 2.5x as long as before.
+            val travelDuration = Random.nextLong(6500L, 10750L)
             movement = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = Random.nextLong(2600L, 4300L)
+                duration = travelDuration
                 interpolator = AccelerateDecelerateInterpolator()
                 addUpdateListener { a ->
                     val f = a.animatedValue as Float
@@ -61,7 +63,8 @@ object PuppyOverlay : HudController.Listener {
                 }
                 start()
             }
-            main.postDelayed(this, Random.nextLong(5200L, 8500L))
+            // Let the full slower movement finish, then pause briefly before wandering again.
+            main.postDelayed(this, travelDuration + Random.nextLong(2500L, 4000L))
         }
     }
 
@@ -85,6 +88,8 @@ object PuppyOverlay : HudController.Listener {
                 val puppy = ImageView(app).apply {
                     setImageResource(R.drawable.jarvis_puppy)
                     scaleType = ImageView.ScaleType.FIT_CENTER
+                    // Reduce normal puppy visibility by 40% (100% -> 60% opacity).
+                    alpha = 0.6f
                     contentDescription = "Jarvis puppy. Tap to talk, drag to move."
                     setOnTouchListener { view, event ->
                         when (event.action) {
@@ -144,11 +149,11 @@ object PuppyOverlay : HudController.Listener {
         main.post {
             val v = image ?: return@post
             when (state) {
-                HudState.LISTENING -> { v.alpha = 1f; v.scaleX = 1.12f; v.scaleY = 1.12f }
-                HudState.THINKING, HudState.EXECUTING -> { v.alpha = 0.9f; v.scaleX = 0.96f; v.scaleY = 0.96f }
-                HudState.SPEAKING, HudState.DONE -> { v.alpha = 1f; v.scaleX = 1.08f; v.scaleY = 1.08f }
-                HudState.ERROR -> { v.alpha = 0.65f; v.scaleX = 1f; v.scaleY = 1f }
-                else -> { v.alpha = 1f; v.scaleX = 1f; v.scaleY = 1f }
+                HudState.LISTENING -> { v.alpha = 0.6f; v.scaleX = 1.12f; v.scaleY = 1.12f }
+                HudState.THINKING, HudState.EXECUTING -> { v.alpha = 0.54f; v.scaleX = 0.96f; v.scaleY = 0.96f }
+                HudState.SPEAKING, HudState.DONE -> { v.alpha = 0.6f; v.scaleX = 1.08f; v.scaleY = 1.08f }
+                HudState.ERROR -> { v.alpha = 0.39f; v.scaleX = 1f; v.scaleY = 1f }
+                else -> { v.alpha = 0.6f; v.scaleX = 1f; v.scaleY = 1f }
             }
         }
     }
