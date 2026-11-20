@@ -261,8 +261,7 @@ class SettingsActivity : AppCompatActivity() {
             })
         })
 
-        // Voice Type selector removed — only male/JARVIS voice is used
-        settings.setVoiceType("male")
+        // Do not force a male voice here. TTS follows the Android engine's default voice.
 
         root.addView(sectionCard {
             addView(sectionTitle("Voice Speed"))
