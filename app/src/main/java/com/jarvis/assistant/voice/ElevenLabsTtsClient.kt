@@ -3,6 +3,8 @@ package com.jarvis.assistant.voice
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.jarvis.assistant.util.SettingsManager
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +17,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Cloud TTS via ElevenLabs — natural female voice for Jarvis.
@@ -33,7 +36,8 @@ class ElevenLabsTtsClient(private val context: Context) {
         .build()
 
     private var player: MediaPlayer? = null
-    @Volatile private var activeCall: okhttp3.Call? = null
+    private val activeCall = AtomicReference<okhttp3.Call?>(null)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val requestGeneration = AtomicLong(0L)
 
     val isConfigured: Boolean
@@ -83,7 +87,12 @@ class ElevenLabsTtsClient(private val context: Context) {
                 .build()
 
             val call = client.newCall(request)
-            activeCall = call
+            activeCall.set(call)
+            if (requestGeneration.get() != generation) {
+                activeCall.compareAndSet(call, null)
+                call.cancel()
+                return@withContext false
+            }
             call.execute().use { response ->
                 if (call.isCanceled() || requestGeneration.get() != generation) return@withContext false
                 if (!response.isSuccessful) {
@@ -95,10 +104,10 @@ class ElevenLabsTtsClient(private val context: Context) {
                 if (bytes.isEmpty()) return@withContext false
 
                 if (call.isCanceled() || requestGeneration.get() != generation) {
-                    activeCall = null
+                    activeCall.compareAndSet(call, null)
                     return@withContext false
                 }
-                activeCall = null
+                activeCall.compareAndSet(call, null)
                 val cache = File(context.cacheDir, "jarvis_tts_el.mp3")
                 cache.writeBytes(bytes)
 
@@ -140,10 +149,12 @@ class ElevenLabsTtsClient(private val context: Context) {
                 prepare()
                 start()
             }
-            player?.isPlaying == true
+            newPlayer.isPlaying
         } catch (e: Exception) {
             Log.e(TAG, "MediaPlayer failed: ${e.message}")
-            player = null
+            if (player === newPlayer) player = null
+            try { newPlayer.reset() } catch (_: Exception) {}
+            try { newPlayer.release() } catch (_: Exception) {}
             false
         }
     }
@@ -156,20 +167,18 @@ class ElevenLabsTtsClient(private val context: Context) {
 
     fun stop() {
         requestGeneration.incrementAndGet()
-        try {
-            activeCall?.cancel()
-        } catch (_: Exception) {
-        }
-        activeCall = null
-        try {
-            player?.stop()
-        } catch (_: Exception) {
-        }
-        try {
-            player?.release()
-        } catch (_: Exception) {
-        }
+        activeCall.getAndSet(null)?.cancel()
+        // MediaPlayer is created and played on main; stop/release it there too.
+        val cleanup = Runnable { releasePlayer() }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run()
+        else mainHandler.post(cleanup)
+    }
+
+    private fun releasePlayer() {
+        val current = player ?: return
         player = null
+        try { current.stop() } catch (_: Exception) {}
+        try { current.release() } catch (_: Exception) {}
     }
 
     companion object {
