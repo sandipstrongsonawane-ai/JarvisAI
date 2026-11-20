@@ -570,8 +570,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun runEnrollment() {
         toast("Voice enrollment starting. Background wake word remains enabled. Say the exact same phrase for all three samples.")
         scope.launch {
-            try {
-                val samples = mutableListOf<ShortArray>()
+            val samples = mutableListOf<ShortArray>()
                 val enrollmentPhrase = "Meri awaaz pehchano"
                 val prompts = listOf(
                     "First sample. Say: $enrollmentPhrase",
@@ -608,7 +607,6 @@ class SettingsActivity : AppCompatActivity() {
                 voiceAuthStatus.text = voiceAuthStatusText()
                 toast("Neural voice enrolled and voice lock enabled.")
                 tts.speak("Voice enrollment complete. Voice lock is now enabled.")
-            }
         }
     }
 
