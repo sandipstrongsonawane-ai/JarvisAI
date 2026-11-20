@@ -191,7 +191,8 @@ class MainActivity : AppCompatActivity(),
         permissionLauncher.launch(arrayOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.POST_NOTIFICATIONS
         ))
 
         scheduleFeedbackPromptCheck()
