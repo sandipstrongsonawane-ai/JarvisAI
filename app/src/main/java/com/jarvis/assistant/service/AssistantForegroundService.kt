@@ -128,6 +128,15 @@ class AssistantForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.w("JarvisService", "Microphone permission missing; refusing microphone foreground service start")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
         // Siri-style: on-device KWS only (not continuous Google STT).
         try { stt.stopContinuous() } catch (_: Exception) {}
@@ -290,6 +299,16 @@ class AssistantForegroundService : Service() {
     }
 
     fun startListeningCycle() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.w("JarvisService", "Listening cycle blocked: microphone permission missing")
+            listenCycleRunning = false
+            listener?.onStateChanged(BrainState.ERROR)
+            return
+        }
         val now = System.currentTimeMillis()
         // Allow re-tap after 1.5s (old 8s gate blocked reactor retries)
         if (listenCycleRunning && now - lastListenCycleMs < 1500L) {

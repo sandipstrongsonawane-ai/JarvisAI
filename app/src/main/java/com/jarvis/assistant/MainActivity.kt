@@ -59,8 +59,17 @@ class MainActivity : AppCompatActivity(),
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        startAssistantService()
+    ) { permissions ->
+        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true ||
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (audioGranted) {
+            startAssistantService()
+        } else {
+            pendingListen = false
+            uiState = uiState.copy(response = "Microphone permission is required to use Jarvis voice features.")
+            Toast.makeText(this, "Microphone permission denied. Voice features are unavailable.", Toast.LENGTH_LONG).show()
+        }
         fetchLocationAndWeather()
     }
 
@@ -340,6 +349,13 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun ensureListening() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingListen = true
+            permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+            return
+        }
         try {
             val i = Intent(this, AssistantForegroundService::class.java)
             startForegroundService(i)
