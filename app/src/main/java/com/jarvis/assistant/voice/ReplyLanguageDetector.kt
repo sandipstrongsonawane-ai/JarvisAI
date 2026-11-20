@@ -47,7 +47,7 @@ internal object ReplyLanguageDetector {
         return when {
             marathiScore > hindiScore && marathiScore > 0 -> Locale("mr", "IN")
             hindiScore > 0 -> Locale("hi", "IN")
-            text.any { it in '\\u0900'..'\\u097F' } -> Locale("hi", "IN")
+            text.any { it in '\u0900'..'\u097F' } -> Locale("hi", "IN")
             tokens.isNotEmpty() -> Locale("en", "IN")
             else -> Locale("hi", "IN")
         }
