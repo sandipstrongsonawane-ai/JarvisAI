@@ -208,6 +208,11 @@ class AssistantForegroundService : Service() {
             android.util.Log.i("JarvisService", "Wake start blocked: external microphone session active")
             return
         }
+        // Never let a delayed/repeated service start steal AudioRecord from an active command.
+        if (listenCycleRunning) {
+            android.util.Log.d("JarvisService", "Wake start deferred: command capture owns the microphone")
+            return
+        }
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             try { openWake?.stop() } catch (_: Exception) {}
@@ -220,7 +225,6 @@ class AssistantForegroundService : Service() {
         // Invalidate older delayed starts so they cannot steal the microphone
         // from a newer command/follow-up capture.
         val generation = ++wakeStartGeneration
-        listenCycleRunning = false
         try { stt.stopContinuous() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
         try { openWake?.stop() } catch (_: Exception) {}
@@ -303,7 +307,7 @@ class AssistantForegroundService : Service() {
                 android.util.Log.e("JarvisService", "On-device wake start failed; scheduling retry", e)
                 scheduleWakeResumeRetry()
             }
-        }, 300L)
+        }, 700L)
     }
 
 
@@ -459,12 +463,8 @@ class AssistantForegroundService : Service() {
             android.widget.Toast.makeText(this, "Listening…", android.widget.Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
 
-        // Personal wake acknowledgement — always address the user as Sagar.
-        val ack = "Ji Sagar"
-        try { openWake?.stop() } catch (_: Exception) {}
-        try { porcupine.stop() } catch (_: Exception) {}
-        
-        try { tts.speak(ack) } catch (_: Exception) {}
+        // Start command recognition directly after the wake phrase. No spoken
+        // acknowledgement or activation tone should be injected into the mic handoff.
 
         // Safety timeout (longer session)
         mainHandler.postDelayed({
@@ -530,24 +530,8 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // Wait for the acknowledgement to finish instead of guessing its duration.
-        // This prevents STT from opening over the assistant's own voice and avoids
-        // an unnecessary fixed 1.6-second delay when the acknowledgement is short.
-        val ackWaitStartedAt = android.os.SystemClock.elapsedRealtime()
-        fun waitForAckToFinish() {
-            if (!listenCycleRunning) return
-            val waitedMs = android.os.SystemClock.elapsedRealtime() - ackWaitStartedAt
-            if (!tts.isSpeaking()) {
-                beginStt(false)
-            } else if (waitedMs >= 5000L) {
-                android.util.Log.w("JarvisService", "Wake acknowledgement exceeded 5s; stopping TTS before command capture")
-                tts.stop()
-                beginStt(false)
-            } else {
-                mainHandler.postDelayed({ waitForAckToFinish() }, 100L)
-            }
-        }
-        mainHandler.postDelayed({ waitForAckToFinish() }, 100L)
+        // Wake phrase has completed; open one-shot command STT immediately.
+        beginStt(false)
     }
 
 
