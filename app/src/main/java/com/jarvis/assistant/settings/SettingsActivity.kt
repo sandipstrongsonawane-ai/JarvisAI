@@ -49,8 +49,6 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var voiceAuthStatus: TextView
     private val voiceChipRefs = mutableMapOf<String, LinearLayout>()
     private val scope = CoroutineScope(Dispatchers.Main)
-    @Volatile private var wakePausedForEnrollment = false
-
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) runEnrollment() else toast("Microphone permission is needed to enroll your voice.") }
@@ -569,39 +567,10 @@ class SettingsActivity : AppCompatActivity() {
         else -> "Enrolled — voice lock is OFF."
     }
 
-    private fun pauseWakeMicForEnrollment() {
-        wakePausedForEnrollment = true
-        val pause = Intent(this, com.jarvis.assistant.service.AssistantForegroundService::class.java).apply {
-            action = com.jarvis.assistant.service.AssistantForegroundService.ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC
-        }
-        try {
-            androidx.core.content.ContextCompat.startForegroundService(this, pause)
-        } catch (e: Exception) {
-            android.util.Log.e("JarvisSettings", "Could not pause wake mic for enrollment", e)
-            wakePausedForEnrollment = false
-        }
-    }
-
-    private fun resumeWakeMicAfterEnrollment() {
-        if (!wakePausedForEnrollment) return
-        wakePausedForEnrollment = false
-        val resume = Intent(this, com.jarvis.assistant.service.AssistantForegroundService::class.java).apply {
-            action = com.jarvis.assistant.service.AssistantForegroundService.ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC
-        }
-        try {
-            androidx.core.content.ContextCompat.startForegroundService(this, resume)
-        } catch (e: Exception) {
-            android.util.Log.e("JarvisSettings", "Could not resume wake mic after enrollment", e)
-        }
-    }
-
     private fun runEnrollment() {
-        toast("Voice enrollment starting. Wake word is paused. Say the exact same phrase for all three samples.")
-        pauseWakeMicForEnrollment()
+        toast("Voice enrollment starting. Background wake word remains enabled. Say the exact same phrase for all three samples.")
         scope.launch {
             try {
-                // Give the foreground service time to release its AudioRecord before enrollment capture.
-                kotlinx.coroutines.delay(1200L)
                 val samples = mutableListOf<ShortArray>()
                 val enrollmentPhrase = "Meri awaaz pehchano"
                 val prompts = listOf(
@@ -639,12 +608,6 @@ class SettingsActivity : AppCompatActivity() {
                 voiceAuthStatus.text = voiceAuthStatusText()
                 toast("Neural voice enrolled and voice lock enabled.")
                 tts.speak("Voice enrollment complete. Voice lock is now enabled.")
-            } finally {
-                // Do not reopen wake detection into the enrollment success/failure announcement.
-                kotlinx.coroutines.withTimeoutOrNull(10_000L) {
-                    while (tts.isSpeaking()) kotlinx.coroutines.delay(100L)
-                }
-                resumeWakeMicAfterEnrollment()
             }
         }
     }
@@ -652,7 +615,6 @@ class SettingsActivity : AppCompatActivity() {
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     override fun onDestroy() {
-        resumeWakeMicAfterEnrollment()
         tts.shutdown()
         super.onDestroy()
     }
