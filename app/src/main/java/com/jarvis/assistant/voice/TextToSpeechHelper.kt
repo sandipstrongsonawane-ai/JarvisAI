@@ -93,22 +93,40 @@ class TextToSpeechHelper(context: Context) {
         }
     }
 
-    private fun configureAndroidVoice() {
+    private fun configureAndroidVoice(text: String = "") {
         val tts = androidTts ?: return
         try {
-            // Prefer UK English male-ish system voice when available
-            tts.language = Locale.UK
-            val voices = try { tts.voices } catch (_: Exception) { null }
-            if (voices != null) {
-                val male = voices.firstOrNull { v ->
-                    val n = v.name.lowercase()
-                    (n.contains("male") || n.contains("gb") || n.contains("uk")) &&
-                        !n.contains("female") &&
-                        v.locale.language == "en"
-                } ?: voices.firstOrNull {
-                    it.locale.language == "en" && !it.name.lowercase().contains("female")
+            val requestedLocale = detectReplyLocale(text)
+            val available = try { tts.voices } catch (_: Exception) { null }
+            val localeCandidates = when (requestedLocale.language) {
+                "mr" -> listOf(Locale("mr", "IN"), Locale("hi", "IN"), Locale("en", "IN"))
+                "hi" -> listOf(Locale("hi", "IN"), Locale("mr", "IN"), Locale("en", "IN"))
+                else -> listOf(Locale("en", "IN"), Locale.UK, Locale.US)
+            }
+            var chosen = false
+            if (available != null) {
+                for (locale in localeCandidates) {
+                    val exact = available.filter { it.locale.language == locale.language &&
+                        (it.locale.country.isEmpty() || it.locale.country == locale.country) }
+                    if (exact.isEmpty()) continue
+                    // Prefer a voice with a feminine/warm name hint if the engine exposes one;
+                    // otherwise use the highest-quality matching locale voice.
+                    val preferred = exact.firstOrNull { voiceNameSuggestsFeminine(it.name) }
+                        ?: exact.maxByOrNull { it.quality }
+                    if (preferred != null) {
+                        tts.voice = preferred
+                        chosen = true
+                        Log.i(TAG, "Selected TTS voice locale=${preferred.locale} name=${preferred.name}")
+                        break
+                    }
                 }
-                if (male != null) tts.voice = male
+            }
+            if (!chosen) {
+                val fallbackLocale = localeCandidates.firstOrNull { locale ->
+                    tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
+                } ?: Locale.getDefault()
+                tts.language = fallbackLocale
+                Log.w(TAG, "No matching voice listed; language fallback=${fallbackLocale}")
             }
             val speed = settings.getVoiceSpeed().coerceIn(0.7f, 1.4f)
             val pitch = settings.getVoicePitch().coerceIn(0.8f, 1.2f)
@@ -117,6 +135,27 @@ class TextToSpeechHelper(context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "configureAndroidVoice: ${e.message}")
         }
+    }
+
+    private fun detectReplyLocale(text: String): Locale {
+        val lower = text.lowercase()
+        val marathiHints = listOf(
+            "आहे", "आहोत", "नाही", "काय", "म्हणजे", "करूया", "करतो", "करते",
+            "बरं", "मस्त", "तुम्ही", "तुझं", "आणि", "पण", "झालं", "चालेल", "होईल"
+        )
+        val hasDevanagari = text.any { it in '\\u0900'..'\\u097f' }
+        val hasMarathiHint = marathiHints.any { lower.contains(it) }
+        return when {
+            hasMarathiHint -> Locale("mr", "IN")
+            hasDevanagari -> Locale("hi", "IN")
+            lower.contains("namaskar") || lower.contains("kay") || lower.contains("barobar") -> Locale("mr", "IN")
+            else -> Locale("hi", "IN")
+        }
+    }
+
+    private fun voiceNameSuggestsFeminine(name: String): Boolean {
+        val lower = name.lowercase()
+        return listOf("female", "woman", "feminine").any { lower.contains(it) }
     }
 
     fun stop() {
