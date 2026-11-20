@@ -218,6 +218,14 @@ class CommandExecutor(private val context: Context) {
                         permissions += android.Manifest.permission.READ_CONTACTS
                     }
                 }
+                ActionType.SEARCH_SMS -> permissions += android.Manifest.permission.READ_SMS
+                ActionType.SEARCH_PHOTOS -> {
+                    permissions += if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        android.Manifest.permission.READ_MEDIA_IMAGES
+                    } else {
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE
+                    }
+                }
                 ActionType.MULTI_STEP -> item.steps.orEmpty().forEach(::collect)
                 else -> Unit
             }
