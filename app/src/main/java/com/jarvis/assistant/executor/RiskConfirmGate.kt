@@ -42,9 +42,8 @@ object RiskConfirmGate {
             return false
         }
         return when (type) {
-            // Calls remain immediate when explicitly requested. Messages and destructive
-            // actions require a second confirmation to prevent speech-recognition mistakes.
-            ActionType.CALL -> false
+            // Phone calls are irreversible external actions; require a spoken confirmation.
+            ActionType.CALL,
             ActionType.UNLOCK_APP,
             ActionType.UNINSTALL_APP,
             ActionType.SEND_SMS,
