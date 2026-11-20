@@ -82,7 +82,7 @@ class TextToSpeechHelper(context: Context) {
             return
         }
         try {
-            configureAndroidVoice()
+            configureAndroidVoice(text)
             tts.stop()
             val id = UUID.randomUUID().toString()
             val r = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
