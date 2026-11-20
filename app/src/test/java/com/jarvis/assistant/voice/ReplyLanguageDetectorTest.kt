@@ -4,15 +4,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ReplyLanguageDetectorTest {
-
     @Test
     fun detectsMarathiInDevanagari() {
         assertEquals("mr", ReplyLanguageDetector.detect("मला मदत करा, हे करूया.").language)
+        assertEquals("mr", ReplyLanguageDetector.detect("तुम्ही कसे आहात?").language)
     }
 
     @Test
     fun detectsHindiInDevanagari() {
         assertEquals("hi", ReplyLanguageDetector.detect("मुझे बताओ, यह कैसे करना है?").language)
+        assertEquals("hi", ReplyLanguageDetector.detect("आप अभी कहाँ हैं?").language)
     }
 
     @Test
