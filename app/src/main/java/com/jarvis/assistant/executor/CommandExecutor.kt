@@ -25,7 +25,7 @@ class CommandExecutor(private val context: Context) {
 
     fun execute(cmd: AssistantCommand): String {
         // Confirmation is resolved centrally by AssistantForegroundService before execution.
-        if (!riskBypass && com.jarvis.assistant.executor.RiskConfirmGate.isRisky(cmd)) {
+        if (!riskBypass.get() && com.jarvis.assistant.executor.RiskConfirmGate.isRisky(cmd)) {
             try { com.jarvis.assistant.ui.HudController.thinking() } catch (_: Exception) {}
             return com.jarvis.assistant.executor.RiskConfirmGate.hold(cmd)
         }
@@ -1078,14 +1078,17 @@ private fun setAlarm(target: String?): String {
     }
 
 
-    @Volatile private var riskBypass: Boolean = false
+    // A confirmation bypass belongs only to the current synchronous execution thread.
+    // A shared Boolean could let a concurrent, unconfirmed command skip the risk gate.
+    private val riskBypass = ThreadLocal.withInitial { false }
 
     fun executeConfirmed(cmd: AssistantCommand): String {
-        riskBypass = true
+        val previous = riskBypass.get()
+        riskBypass.set(true)
         try {
             return execute(cmd)
         } finally {
-            riskBypass = false
+            riskBypass.set(previous)
         }
     }
 
