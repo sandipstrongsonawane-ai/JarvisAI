@@ -596,14 +596,14 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Voice enrollment starting. Say the exact same phrase for all three samples.")
+        toast("Voice enrollment starting. Wake word is paused. Say the exact same phrase for all three samples.")
         pauseWakeMicForEnrollment()
         scope.launch {
             try {
                 // Give the foreground service time to release its AudioRecord before enrollment capture.
-                kotlinx.coroutines.delay(500L)
+                kotlinx.coroutines.delay(1200L)
                 val samples = mutableListOf<ShortArray>()
-                val enrollmentPhrase = "Jarvis, meri awaaz pehchano"
+                val enrollmentPhrase = "Meri awaaz pehchano"
                 val prompts = listOf(
                     "First sample. Say: $enrollmentPhrase",
                     "Second sample. Repeat exactly: $enrollmentPhrase",
