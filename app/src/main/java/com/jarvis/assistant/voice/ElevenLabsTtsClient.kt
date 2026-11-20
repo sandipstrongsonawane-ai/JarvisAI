@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Cloud TTS via ElevenLabs — natural female voice for Jarvis.
  *
  * Add the ElevenLabs API key in Jarvis Settings; it is stored with Android Keystore encryption.
- * Optional: ELEVENLABS_VOICE_ID (dashboard → Voices → copy ID)
+ * Voice ID can be changed in Jarvis Settings → Cloud AI & Voice API Keys.
  *
  * The selected female voice is the default. An explicit custom voice ID can override it.
  */
@@ -44,7 +44,7 @@ class ElevenLabsTtsClient(private val context: Context) {
 
     /** Always use the exact female voice ID selected by the user. */
     private val voiceId: String
-        get() = FEMALE_VOICE_ID
+        get() = settings.getElevenLabsVoiceId()
 
     /**
      * Synthesize [text] and play. Returns true if audio started successfully.
