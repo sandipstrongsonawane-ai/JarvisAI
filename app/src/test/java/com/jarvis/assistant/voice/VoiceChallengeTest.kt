@@ -11,8 +11,9 @@ class VoiceChallengeTest {
     }
 
     @Test
-    fun rejectsWrongOrExtraWords() {
-        assertFalse(VoiceChallenge.matches("amber birch copper delta", "amber birch silver delta"))
+    fun toleratesOneOfflineAsrWordErrorButRejectsMultipleErrors() {
+        assertTrue(VoiceChallenge.matches("amber birch copper delta", "amber birch silver delta"))
+        assertFalse(VoiceChallenge.matches("amber birch copper delta", "amber silver tiger delta"))
         assertFalse(VoiceChallenge.matches("amber birch copper delta", "amber birch copper delta please"))
     }
 
