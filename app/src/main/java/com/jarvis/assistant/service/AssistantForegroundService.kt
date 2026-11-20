@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -74,7 +75,7 @@ class AssistantForegroundService : Service() {
     private var wakeRetryPending = false
     private val wakeRetryRunnable = Runnable {
         wakeRetryPending = false
-        if (!listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
+        if (!isDestroyed && !listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
     }
 
     var listener: AssistantListener? = null
@@ -198,7 +199,7 @@ class AssistantForegroundService : Service() {
 
         val onWake: () -> Unit = {
             mainHandler.post {
-                if (!listenCycleRunning) {
+                if (!isDestroyed && !listenCycleRunning) {
                     android.util.Log.i("JarvisService", "On-device wake detected — opening command STT")
                     try { voicuteWake?.stop() } catch (_: Exception) {}
                     
@@ -214,8 +215,10 @@ class AssistantForegroundService : Service() {
             val voicuteStarted = try {
                 val started = voicuteWake?.start(onWake) {
                     mainHandler.post {
-                        wakeStartInProgress = false
-                        if (!listenCycleRunning) scheduleWakeRetry()
+                        if (!isDestroyed) {
+                            wakeStartInProgress = false
+                            if (!listenCycleRunning) scheduleWakeRetry()
+                        }
                     }
                 } == true
                 started && voicuteWake?.isRunning() == true
@@ -224,6 +227,7 @@ class AssistantForegroundService : Service() {
                 false
             }
             mainHandler.post {
+                if (isDestroyed) return@post
                 wakeStartInProgress = false
                 if (voicuteStarted) {
                     wakeRetryAttempt = 0
@@ -877,6 +881,9 @@ class AssistantForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
+        // Prevent late IO/start callbacks or command coroutines from reviving work
+        // after Android has destroyed this foreground service.
+        scope.cancel()
         try { voicuteWake?.stop() } catch (_: Exception) {}
         try { callAnnouncer?.stop() } catch (_: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
