@@ -5,6 +5,8 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.media.audiofx.NoiseSuppressor;
 import android.util.Log;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Audio capture with ring buffer and RMS computation.
@@ -34,6 +36,7 @@ public class AudioCapture {
     private volatile boolean running;
     private volatile boolean alive;
     private Listener listener;
+    private volatile CountDownLatch startSignal;
 
     // Stats
     private volatile float latestRms;
@@ -71,12 +74,34 @@ public class AudioCapture {
     /** Whether capture thread is alive and recording. */
     public boolean isAlive() { return alive; }
 
-    /** Start capture thread. */
-    public void start() {
+    /** Start capture and wait until AudioRecord is actually recording. */
+    public boolean start() {
         running = true;
+        alive = false;
         ringPos = 0;
+        CountDownLatch signal = new CountDownLatch(1);
+        startSignal = signal;
         captureThread = new Thread(this::captureLoop, "AudioCapture");
         captureThread.start();
+        try {
+            if (!signal.await(2500, TimeUnit.MILLISECONDS) || !alive) {
+                if (listener != null) listener.onMicError("Microphone did not become ready");
+                stop();
+                return false;
+            }
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            stop();
+            return false;
+        } finally {
+            if (startSignal == signal) startSignal = null;
+        }
+    }
+
+    private void signalStart() {
+        CountDownLatch signal = startSignal;
+        if (signal != null) signal.countDown();
     }
 
     /** Stop capture thread and release resources. */
@@ -135,6 +160,7 @@ public class AudioCapture {
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 if (listener != null) listener.onMicError("麦克风初始化失败");
                 running = false;
+                signalStart();
                 return;
             }
 
@@ -144,7 +170,11 @@ public class AudioCapture {
             }
 
             recorder.startRecording();
+            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                throw new IllegalStateException("AudioRecord did not enter RECORDSTATE_RECORDING");
+            }
             alive = true;
+            signalStart();
 
             short[] readChunk = new short[WakeWordEngine.MEL_HOP_SAMPLES * 8];
             long lastCaptureLog = 0;
@@ -202,6 +232,9 @@ public class AudioCapture {
         } catch (Exception e) {
             Log.e(TAG, "Capture thread crashed", e);
             alive = false;
+            running = false;
+            signalStart();
+            if (listener != null) listener.onMicError("Microphone startup/capture failed: " + e.getMessage());
             if (recorder != null) {
                 try { recorder.stop(); } catch (Exception ignored) {}
                 try { recorder.release(); } catch (Exception ignored) {}

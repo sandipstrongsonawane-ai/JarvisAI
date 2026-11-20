@@ -21,7 +21,12 @@ class SettingsManager(context: Context) {
     fun setVoiceType(type: String) = prefs.edit().putString("voice_type", type).apply()
 
     /** Prefer ElevenLabs human voice when online + API key set (default on). */
-    fun getPreferCloudVoice(): Boolean = prefs.getBoolean("prefer_cloud_voice", false)
+    // Use the selected ElevenLabs voice automatically only when this build has a key;
+    // an explicit saved false still keeps local Android TTS.
+    fun getPreferCloudVoice(): Boolean = prefs.getBoolean(
+        "prefer_cloud_voice",
+        com.jarvis.assistant.BuildConfig.ELEVENLABS_API_KEY.isNotBlank()
+    )
     fun setPreferCloudVoice(enabled: Boolean) =
         prefs.edit().putBoolean("prefer_cloud_voice", enabled).apply()
 

@@ -84,17 +84,24 @@ class MultiStepExecutor(
         val s = speech.trim()
         val lower = s.lowercase()
 
-        // open X and send/message Y
+        // WhatsApp message chains require both a recipient and message body.
+        // Never report "message ready" for a REPLY action: that does not send anything.
         Regex(
-            """open\s+(.+?)\s+and\s+(?:send|message|text)\s+(.+)""",
+            """open\s+whatsapp\s+and\s+(?:send|message|text)\s+(.+?)\s+to\s+(.+)""",
             RegexOption.IGNORE_CASE
         ).find(s)?.let { m ->
-            val app = m.groupValues[1].trim()
-            val msg = m.groupValues[2].trim()
-            return listOf(
-                AssistantCommand(action = ActionType.OPEN_APP.key, target = app),
-                AssistantCommand(action = ActionType.REPLY.key, message = "Opened $app. Message ready: $msg")
-            )
+            val message = m.groupValues[1].trim()
+            val recipient = m.groupValues[2].trim()
+            if (message.isNotBlank() && recipient.isNotBlank()) {
+                return listOf(
+                    AssistantCommand(action = ActionType.OPEN_APP.key, target = "WhatsApp"),
+                    AssistantCommand(
+                        action = ActionType.WHATSAPP_MESSAGE.key,
+                        target = recipient,
+                        message = message
+                    )
+                )
+            }
         }
 
         // open X then / and open Y

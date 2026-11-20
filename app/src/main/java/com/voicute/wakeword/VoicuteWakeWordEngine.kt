@@ -13,7 +13,8 @@ class VoicuteWakeWordEngine(context: Context) {
     private var engine: WakeWordEngine? = null
     private var capture: AudioCapture? = null
     private var inferenceThread: Thread? = null
-    private var detection: DetectionLogic? = null
+    // Preserve cooldown/burst history across short listen-cycle restarts.
+    private val detection = DetectionLogic()
 
     @Synchronized
     fun start(onWake: () -> Unit): Boolean {
@@ -28,10 +29,14 @@ class VoicuteWakeWordEngine(context: Context) {
 
         val activeCapture = AudioCapture()
         activeCapture.setListener { message -> Log.e(TAG, "Voicute microphone error: $message") }
-        val gates = DetectionLogic()
+        val gates = detection
         capture = activeCapture
-        detection = gates
-        activeCapture.start()
+        if (!activeCapture.start()) {
+            Log.e(TAG, "Voicute microphone failed to initialize; wake listener not armed")
+            activeCapture.stop()
+            capture = null
+            return false
+        }
         running = true
 
         inferenceThread = Thread({
@@ -102,7 +107,6 @@ class VoicuteWakeWordEngine(context: Context) {
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
-        detection = null
     }
 
     @Synchronized

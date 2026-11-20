@@ -60,6 +60,22 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun parsesWhatsAppMessageOnlyWhenRecipientAndBodyArePresent() {
+        val steps = executor().parseOfflineChain("open WhatsApp and send Hello Rahul to Rahul")
+        assertEquals(2, steps?.size)
+        assertEquals("open_app", steps?.get(0)?.action)
+        assertEquals("WhatsApp", steps?.get(0)?.target)
+        assertEquals("whatsapp_message", steps?.get(1)?.action)
+        assertEquals("Rahul", steps?.get(1)?.target)
+        assertEquals("Hello Rahul", steps?.get(1)?.message)
+    }
+
+    @Test
+    fun doesNotPretendToSendWhatsAppMessageWithoutRecipient() {
+        assertNull(executor().parseOfflineChain("open WhatsApp and send Hello Rahul"))
+    }
+
+    @Test
     fun parsesEnglishMultiActionOpenChain() {
         val steps = executor().parseOfflineChain("open Chrome and then open Maps")
         assertEquals(2, steps?.size)

@@ -39,8 +39,6 @@ class ElevenLabsTtsClient(private val context: Context) {
     private val apiKey: String
         get() = BuildConfig.ELEVENLABS_API_KEY.trim()
 
-    private val settings = SettingsManager(context)
-
     /** Female voice is the default; an explicit custom BuildConfig voice ID remains supported. */
     private val voiceId: String
         get() {
@@ -97,7 +95,6 @@ class ElevenLabsTtsClient(private val context: Context) {
                 withContext(Dispatchers.Main) {
                     playFile(cache)
                 }
-                true
             }
         } catch (e: Exception) {
             Log.e(TAG, "ElevenLabs speak failed: ${e.message}", e)
@@ -105,9 +102,9 @@ class ElevenLabsTtsClient(private val context: Context) {
         }
     }
 
-    private fun playFile(file: File) {
+    private fun playFile(file: File): Boolean {
         stop()
-        try {
+        return try {
             player = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -134,9 +131,11 @@ class ElevenLabsTtsClient(private val context: Context) {
                 prepare()
                 start()
             }
+            player?.isPlaying == true
         } catch (e: Exception) {
             Log.e(TAG, "MediaPlayer failed: ${e.message}")
             player = null
+            false
         }
     }
 

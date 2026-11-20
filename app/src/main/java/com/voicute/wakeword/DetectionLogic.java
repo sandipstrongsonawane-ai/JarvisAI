@@ -83,7 +83,12 @@ class DetectionLogic {
         pHist[hi] = prob;
         tHist[hi] = now;
         hi = (hi + 1) % HIST;
-        if (word == null || word.isEmpty()) bg = bg * 0.995f + prob * 0.005f;
+        // The classifier labels scores >0.5 as a candidate, but the runtime
+        // trigger threshold is 0.55. Treat sub-threshold candidates as background
+        // so they do not disappear from the adaptive noise estimate.
+        if (word == null || word.isEmpty() || prob < 0.55f) {
+            bg = bg * 0.995f + prob * 0.005f;
+        }
         rmsHist[ri] = rms;
         rmsTHist[ri] = now;
         ri = (ri + 1) % RMS_HIST;

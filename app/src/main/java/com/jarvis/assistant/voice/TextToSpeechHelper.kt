@@ -9,6 +9,11 @@ import com.jarvis.assistant.util.SettingsManager
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Female-first Android TTS. Cloud/API text is spoken through this same path.
@@ -19,6 +24,8 @@ class TextToSpeechHelper(context: Context) {
     private val settings = SettingsManager(app)
     private var androidTts: TextToSpeech? = null
     private val androidReady = AtomicBoolean(false)
+    private val cloudTts = ElevenLabsTtsClient(app)
+    private val speechScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var pending: String? = null
 
     init {
@@ -52,7 +59,19 @@ class TextToSpeechHelper(context: Context) {
             .replace(" – ", ", ")
             .trim()
         if (cleaned.isEmpty()) return
-        speakAndroid(cleaned)
+        if (settings.getPreferCloudVoice() && cloudTts.isConfigured) {
+            speechScope.launch {
+                // Do not let Android TTS overlap a cloud utterance.
+                try { androidTts?.stop() } catch (_: Exception) {}
+                val started = cloudTts.speak(cleaned)
+                if (!started) {
+                    Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
+                    speakAndroid(cleaned)
+                }
+            }
+        } else {
+            speakAndroid(cleaned)
+        }
     }
 
     private fun speakAndroid(text: String) {
@@ -109,11 +128,13 @@ class TextToSpeechHelper(context: Context) {
     }
 
     fun stop() {
+        try { cloudTts.stop() } catch (_: Exception) {}
         try { androidTts?.stop() } catch (_: Exception) {}
     }
 
     fun shutdown() {
         stop()
+        speechScope.cancel()
         try { androidTts?.shutdown() } catch (_: Exception) {}
         androidTts = null
         androidReady.set(false)
