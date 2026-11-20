@@ -87,7 +87,12 @@ class AssistantForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "jarvis_channel"
         const val NOTIF_ID = 101
+        const val ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC = "com.jarvis.assistant.PAUSE_WAKE_FOR_EXTERNAL_MIC"
+        const val ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC = "com.jarvis.assistant.RESUME_WAKE_AFTER_EXTERNAL_MIC"
     }
+
+    @Volatile
+    private var externalMicSessionActive = false
 
     override fun onCreate() {
         super.onCreate()
@@ -130,6 +135,22 @@ class AssistantForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
+        when (intent?.action) {
+            ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC -> {
+                externalMicSessionActive = true
+                listenCycleRunning = false
+                releaseAllMics()
+                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+                android.util.Log.i("JarvisService", "Wake mic paused for external capture")
+                return START_STICKY
+            }
+            ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC -> {
+                externalMicSessionActive = false
+                resumeWakeSoon(700L)
+                android.util.Log.i("JarvisService", "Wake mic resume requested after external capture")
+                return START_STICKY
+            }
+        }
         // Siri-style: on-device KWS only (not continuous Google STT).
         try { stt.stopContinuous() } catch (_: Exception) {}
         startWakeWordListening()
@@ -155,6 +176,10 @@ class AssistantForegroundService : Service() {
      * No continuous Google STT fallback: it causes repeated Android mic activation tones.
      */
     private fun startWakeWordListening() {
+        if (externalMicSessionActive) {
+            android.util.Log.i("JarvisService", "Wake start blocked while external mic capture is active")
+            return
+        }
         val sm = SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             android.util.Log.i("JarvisService", "Wake off in settings")
@@ -184,6 +209,7 @@ class AssistantForegroundService : Service() {
             false
         }
         if (openWakeStarted) {
+            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
             android.util.Log.i("JarvisService", "On-device OpenWakeWord active — Hey Jarvis")
             return
         }
@@ -198,6 +224,7 @@ class AssistantForegroundService : Service() {
             false
         }
         if (porcupineStarted) {
+            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
             android.util.Log.i("JarvisService", "On-device Porcupine fallback active — Jarvis")
         } else {
             android.util.Log.e("JarvisService", "No on-device wake engine could start; background wake remains idle")
@@ -223,6 +250,10 @@ class AssistantForegroundService : Service() {
 
     private fun resumeWakeSoon(delayMs: Long = 1800L) {
         mainHandler.postDelayed({
+            if (externalMicSessionActive) {
+                android.util.Log.i("JarvisService", "Wake resume postponed: external mic session still active")
+                return@postDelayed
+            }
             try {
                 // Critical: Google STT must be fully stopped before OpenWakeWord takes AudioRecord
                 forceReleaseCommandMic()

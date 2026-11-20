@@ -29,6 +29,7 @@ import com.jarvis.assistant.util.PersistentMemory
 import com.jarvis.assistant.util.SettingsManager
 import com.jarvis.assistant.voice.TextToSpeechHelper
 import com.jarvis.assistant.voice.VoiceAuthManager
+import com.jarvis.assistant.service.AssistantForegroundService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -515,36 +516,59 @@ class SettingsActivity : AppCompatActivity() {
         else -> "Enrolled — voice lock is OFF."
     }
 
+    private fun pauseWakeMicForEnrollment() {
+        val intent = Intent(this, AssistantForegroundService::class.java).apply {
+            action = AssistantForegroundService.ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC
+        }
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun resumeWakeMicAfterEnrollment() {
+        val intent = Intent(this, AssistantForegroundService::class.java).apply {
+            action = AssistantForegroundService.ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC
+        }
+        ContextCompat.startForegroundService(this, intent)
+    }
+
     private fun runEnrollment() {
         toast("Voice enrollment starting. Keep the phone near you and use the same phrase for all three samples.")
+        pauseWakeMicForEnrollment()
         scope.launch {
-            val samples = mutableListOf<ShortArray>()
-            val prompts = listOf("First sample. Say your chosen phrase now.",
-                "Second sample. Repeat the same phrase.",
-                "Final sample. Repeat the same phrase once more.")
-            for (i in prompts.indices) {
-                tts.speak(prompts[i])
-                // Give the spoken prompt time to finish before opening the recorder.
-                kotlinx.coroutines.delay(2200L)
-                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2200) }
-                if (sample == null) {
-                    toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
-                    tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
+            try {
+                // Wait for the foreground wake engine to stop and release AudioRecord.
+                kotlinx.coroutines.delay(900L)
+                val samples = mutableListOf<ShortArray>()
+                val prompts = listOf("First sample. Say your chosen phrase now.",
+                    "Second sample. Repeat the same phrase.",
+                    "Final sample. Repeat the same phrase once more.")
+                for (i in prompts.indices) {
+                    tts.speak(prompts[i])
+                    // Give the spoken prompt time to finish before opening the recorder.
+                    kotlinx.coroutines.delay(2200L)
+                    val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2200) }
+                    if (sample == null) {
+                        toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
+                        tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
+                        return@launch
+                    }
+                    samples += sample
+                    kotlinx.coroutines.delay(500L)
+                }
+                val enrolled = voiceAuth.enrollFromSamples(samples)
+                if (!enrolled) {
+                    toast("Neural voice enrollment failed. Please retry in a quiet place.")
+                    tts.speak("Voice enrollment failed. Please try again.")
                     return@launch
                 }
-                samples += sample
-                kotlinx.coroutines.delay(500L)
+                voiceAuth.setEnabled(true)
+                voiceAuthStatus.text = voiceAuthStatusText()
+                toast("Neural voice enrolled and voice lock enabled.")
+                tts.speak("Voice enrollment complete. Voice lock is now enabled.")
+            } finally {
+                // Resume wake listening even if capture, enrollment, or TTS exits early.
+                kotlinx.coroutines.delay(700L)
+                resumeWakeMicAfterEnrollment()
             }
-            val enrolled = voiceAuth.enrollFromSamples(samples)
-            if (!enrolled) {
-                toast("Neural voice enrollment failed. Please retry in a quiet place.")
-                tts.speak("Voice enrollment failed. Please try again.")
-                return@launch
-            }
-            voiceAuth.setEnabled(true)
-            voiceAuthStatus.text = voiceAuthStatusText()
-            toast("Neural voice enrolled and voice lock enabled.")
-            tts.speak("Voice enrollment complete. Voice lock is now enabled.")
         }
     }
 
