@@ -393,28 +393,28 @@ class MainActivity : AppCompatActivity(),
             permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
             return
         }
+
+        // If already bound, hand the mic directly to command STT.
+        val activeService = service
+        if (activeService != null) {
+            activeService.startListeningCycle()
+            return
+        }
+
+        // If the service is not connected yet, use the explicit manual-Listen action.
+        // onStartCommand will start command capture directly, without arming wake first.
+        val listenIntent = Intent(this, AssistantForegroundService::class.java).apply {
+            action = com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING
+        }
         try {
-            val i = Intent(this, AssistantForegroundService::class.java)
-            startForegroundService(i)
+            startForegroundService(listenIntent)
         } catch (_: Exception) {
             try {
-                startService(Intent(this, AssistantForegroundService::class.java))
+                startService(listenIntent)
             } catch (_: Exception) {}
         }
-        val s = service
-        if (s != null) {
-            s.startListeningCycle()
-        } else {
-            // Not bound yet — bind then listen on connect
-            pendingListen = true
-            try {
-                bindService(
-                    Intent(this, AssistantForegroundService::class.java),
-                    connection,
-                    BIND_AUTO_CREATE
-                )
-            } catch (_: Exception) {}
-        }
+        try {
+            bindService(listenIntent, connection, BIND_AUTO_CREATE)
+        } catch (_: Exception) {}
     }
-
 }
