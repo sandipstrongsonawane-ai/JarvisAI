@@ -254,7 +254,12 @@ class AssistantForegroundService : Service() {
                     }, 5_000L)
                 }
             }
+            // Keep the HUD green while the original continuous SpeechRecognizer owns the mic.
+            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
+            listener?.onStateChanged(BrainState.LISTENING)
         } catch (e: Exception) {
+            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+            listener?.onStateChanged(BrainState.IDLE)
             android.util.Log.e("JarvisService", "STT wake failed: ${e.message}")
         }
     }
