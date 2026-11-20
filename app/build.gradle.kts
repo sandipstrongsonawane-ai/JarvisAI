@@ -75,8 +75,10 @@ dependencies {
     implementation("xyz.rementia:openwakeword:0.1.5")
     implementation("ai.picovoice:porcupine-android:3.0.3")
     implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
+        // The Android AAR bundles its matching ONNX Runtime native library.
+        // Exclude the transitive standalone runtime AAR to avoid duplicate libonnxruntime.so.
+        exclude(group = "com.microsoft.onnxruntime", module = "onnxruntime-android")
         // The Android AAR already contains the sherpa JVM API classes.
-        // Exclude the separately published JVM JAR to prevent duplicate classes.
         exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
     }
     implementation("com.google.android.gms:play-services-location:21.3.0")
