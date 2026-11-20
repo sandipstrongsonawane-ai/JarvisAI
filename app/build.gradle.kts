@@ -72,7 +72,11 @@ android {
 }
 
 dependencies {
-    implementation("xyz.rementia:openwakeword:0.1.5")
+    implementation("xyz.rementia:openwakeword:0.1.5") {
+        // Sherpa-ONNX supplies the native ONNX Runtime used by CAM++.
+        // Do not package OpenWakeWord's older transitive ONNX Runtime native library.
+        exclude(group = "com.microsoft.onnxruntime", module = "onnxruntime-android")
+    }
     implementation("ai.picovoice:porcupine-android:3.0.3")
     implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
         // The Android AAR bundles its matching ONNX Runtime native library.
