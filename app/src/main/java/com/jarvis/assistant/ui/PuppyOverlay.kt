@@ -50,8 +50,9 @@ object PuppyOverlay : HudController.Listener {
             val originX = p.x
             val originY = p.y
             movement?.cancel()
-            // 60% slower means each travel takes 2.5x as long as before.
-            val travelDuration = Random.nextLong(6500L, 10750L)
+            // 3% of the original movement speed: a deliberately very slow, gentle wander.
+            // Original travel was 2.6–4.3 seconds; divide by 0.03.
+            val travelDuration = Random.nextLong(86_000L, 144_000L)
             movement = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = travelDuration
                 interpolator = AccelerateDecelerateInterpolator()
@@ -75,7 +76,7 @@ object PuppyOverlay : HudController.Listener {
             if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(app)) return@post
             try {
                 val wm = app.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                val size = (64 * app.resources.displayMetrics.density).toInt()
+                val size = (28 * app.resources.displayMetrics.density).toInt()
                 val type = if (Build.VERSION.SDK_INT >= 26)
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
@@ -88,7 +89,7 @@ object PuppyOverlay : HudController.Listener {
                 val puppy = ImageView(app).apply {
                     setImageResource(R.drawable.jarvis_puppy)
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    // Reduce normal puppy visibility by 40% (100% -> 60% opacity).
+                    // Keep the smaller puppy clearly visible without overpowering the screen.
                     alpha = 0.6f
                     contentDescription = "Jarvis puppy. Tap to talk, drag to move."
                     setOnTouchListener { view, event ->
