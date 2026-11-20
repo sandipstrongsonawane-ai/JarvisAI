@@ -23,8 +23,9 @@ internal object ContactMatchResolver {
         uniqueNumber(exact)?.let { return it }
         if (exact.isNotEmpty()) return null
 
-        val tokenPrefix = normalized.filter { (_, name) ->
-            name.split(Regex("(?<=^)|(?<=\\s)")).any { it.startsWith(q) }
+        val tokenPrefix = normalized.filter { (contact, _) ->
+            contact.displayName.lowercase().split(Regex("[^\\p{L}\\p{N}]+"))
+                .filter { it.isNotBlank() }.any { normalize(it).startsWith(q) }
         }.map { it.first }
         uniqueNumber(tokenPrefix)?.let { return it }
         if (tokenPrefix.isNotEmpty()) return null
