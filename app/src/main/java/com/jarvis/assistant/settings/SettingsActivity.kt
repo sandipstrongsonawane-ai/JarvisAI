@@ -295,8 +295,8 @@ class SettingsActivity : AppCompatActivity() {
         })
         
         root.addView(sectionCard {
-            addView(sectionTitle("Cloud AI API Keys"))
-            addView(bodyText("Add your own keys here. They are encrypted on this phone. Groq is tried first; Gemini is the fallback."))
+            addView(sectionTitle("Cloud AI & Voice API Keys"))
+            addView(bodyText("Keys are encrypted on this phone and are not embedded in the APK. Groq is tried first; Gemini is the fallback."))
             val groqInput = hudEditText(settings.getGroqApiKey()).apply {
                 hint = "Groq API key"
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -307,10 +307,24 @@ class SettingsActivity : AppCompatActivity() {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 setSingleLine(true)
             }
+            val elevenLabsInput = hudEditText(settings.getElevenLabsApiKey()).apply {
+                hint = "ElevenLabs API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            val weatherInput = hudEditText(settings.getOpenWeatherApiKey()).apply {
+                hint = "OpenWeather API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
             addView(bodyText("GROQ"))
             addView(groqInput)
             addView(bodyText("GEMINI"))
             addView(geminiInput)
+            addView(bodyText("ELEVENLABS — FEMALE VOICE"))
+            addView(elevenLabsInput)
+            addView(bodyText("OPENWEATHER"))
+            addView(weatherInput)
             var keysVisible = false
             addView(hudButton("SHOW / HIDE KEYS") {
                 keysVisible = !keysVisible
@@ -321,12 +335,18 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 groqInput.inputType = type
                 geminiInput.inputType = type
+                elevenLabsInput.inputType = type
+                weatherInput.inputType = type
                 groqInput.setSelection(groqInput.text.length)
                 geminiInput.setSelection(geminiInput.text.length)
+                elevenLabsInput.setSelection(elevenLabsInput.text.length)
+                weatherInput.setSelection(weatherInput.text.length)
             })
             addView(hudButton("SAVE API KEYS", filled = true) {
                 settings.setGroqApiKey(groqInput.text.toString().trim())
                 settings.setGeminiApiKey(geminiInput.text.toString().trim())
+                settings.setElevenLabsApiKey(elevenLabsInput.text.toString().trim())
+                settings.setOpenWeatherApiKey(weatherInput.text.toString().trim())
                 toast("API keys saved securely on this phone.")
             })
             addView(hudButton("TEST GROQ CONNECTION") {

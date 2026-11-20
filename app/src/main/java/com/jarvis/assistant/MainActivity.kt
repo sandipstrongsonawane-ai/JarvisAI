@@ -183,7 +183,7 @@ class MainActivity : AppCompatActivity(),
         startPerfLoop()
 
         locationHelper = LocationHelper(this)
-        weatherClient = WeatherClient(apiKey = BuildConfig.OPENWEATHER_API_KEY)
+        weatherClient = WeatherClient(apiKey = settings.getOpenWeatherApiKey())
 
         permissionLauncher.launch(arrayOf(
             Manifest.permission.RECORD_AUDIO,

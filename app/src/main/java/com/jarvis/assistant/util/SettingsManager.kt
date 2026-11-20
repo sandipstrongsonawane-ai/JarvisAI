@@ -20,13 +20,10 @@ class SettingsManager(context: Context) {
     fun getVoiceType(): String = prefs.getString("voice_type", "female") ?: "female"
     fun setVoiceType(type: String) = prefs.edit().putString("voice_type", type).apply()
 
-    /** Prefer ElevenLabs human voice when online + API key set (default on). */
-    // Use the selected ElevenLabs voice automatically only when this build has a key;
-    // an explicit saved false still keeps local Android TTS.
-    fun getPreferCloudVoice(): Boolean = prefs.getBoolean(
-        "prefer_cloud_voice",
-        com.jarvis.assistant.BuildConfig.ELEVENLABS_API_KEY.isNotBlank()
-    )
+    /** Prefer ElevenLabs human voice when an encrypted runtime key is available. */
+    fun getPreferCloudVoice(): Boolean =
+        prefs.getBoolean("prefer_cloud_voice", getElevenLabsApiKey().isNotBlank())
+
     fun setPreferCloudVoice(enabled: Boolean) =
         prefs.edit().putBoolean("prefer_cloud_voice", enabled).apply()
 
@@ -68,6 +65,15 @@ class SettingsManager(context: Context) {
     fun setGroqApiKey(value: String) = secureApiKeys.put("groq", value)
     fun getGeminiApiKey(): String = secureApiKeys.get("gemini") ?: ""
     fun setGeminiApiKey(value: String) = secureApiKeys.put("gemini", value)
+
+    fun getElevenLabsApiKey(): String = secureApiKeys.get("elevenlabs") ?: ""
+    fun setElevenLabsApiKey(value: String) {
+        secureApiKeys.put("elevenlabs", value)
+        if (value.isNotBlank()) setPreferCloudVoice(true)
+    }
+
+    fun getOpenWeatherApiKey(): String = secureApiKeys.get("openweather") ?: ""
+    fun setOpenWeatherApiKey(value: String) = secureApiKeys.put("openweather", value)
 
     fun clear() { prefs.edit().clear().apply(); secureApiKeys.clear() }
 

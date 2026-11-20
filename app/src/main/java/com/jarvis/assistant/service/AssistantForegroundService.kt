@@ -1,6 +1,5 @@
 package com.jarvis.assistant.service
 
-import com.jarvis.assistant.BuildConfig
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -105,9 +104,9 @@ class AssistantForegroundService : Service() {
         callAnnouncer = com.jarvis.assistant.util.IncomingCallAnnouncer(this) { tts }
         try { callAnnouncer?.start() } catch (_: Exception) {}
         executor = CommandExecutor(this)
-        gemini = GeminiClient(apiKeyProvider = { SettingsManager(this).getGeminiApiKey().ifBlank { BuildConfig.GEMINI_API_KEY } })
+        gemini = GeminiClient(apiKeyProvider = { SettingsManager(this).getGeminiApiKey() })
         networkStatus = NetworkStatusManager(this)
-        weatherClient = WeatherClient(BuildConfig.OPENWEATHER_API_KEY)
+        weatherClient = WeatherClient(SettingsManager(this).getOpenWeatherApiKey())
         locationHelper = LocationHelper(this)
         pcBridge = PcBridgeServer(this) { speech -> processSpeech(speech) }
         voiceAuth = com.jarvis.assistant.voice.VoiceAuthManager(this)
@@ -667,7 +666,7 @@ class AssistantForegroundService : Service() {
         } else if (networkStatus.isOnline()) {
             val groqClient = JarvisLlmClient(
                 apiKeyProvider = {
-                    SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY }
+                    SettingsManager(this).getGroqApiKey()
                 }
             )
             val groqCommand = try {
@@ -734,7 +733,7 @@ class AssistantForegroundService : Service() {
         }
 
         val result = try {
-            JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chat(combined)
+            JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey() }).chat(combined)
         } catch (e: Exception) {
             null
         }

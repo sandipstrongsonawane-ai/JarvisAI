@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.util.Log
-import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.util.SettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +25,7 @@ import java.util.concurrent.TimeUnit
  */
 class ElevenLabsTtsClient(private val context: Context) {
 
+    private val settings = SettingsManager(context.applicationContext)
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
@@ -35,10 +35,10 @@ class ElevenLabsTtsClient(private val context: Context) {
     @Volatile private var activeCall: okhttp3.Call? = null
 
     val isConfigured: Boolean
-        get() = BuildConfig.ELEVENLABS_API_KEY.trim().isNotEmpty()
+        get() = settings.getElevenLabsApiKey().isNotBlank()
 
     private val apiKey: String
-        get() = BuildConfig.ELEVENLABS_API_KEY.trim()
+        get() = settings.getElevenLabsApiKey().trim()
 
     /** Always use the exact female voice ID selected by the user. */
     private val voiceId: String

@@ -25,7 +25,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.R
 import com.jarvis.assistant.ai.JarvisLlmClient
 import com.jarvis.assistant.util.SettingsManager
@@ -204,7 +203,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
                 return@launch
             }
             val result = withContext(Dispatchers.IO) {
-                JarvisLlmClient(apiKeyProvider = { SettingsManager(this@ChatActivity).getGroqApiKey().ifBlank { BuildConfig.GROQ_API_KEY } }).chatWithImage(prompt, base64, mime)
+                JarvisLlmClient(apiKeyProvider = { SettingsManager(this@ChatActivity).getGroqApiKey() }).chatWithImage(prompt, base64, mime)
             }
             if (result.ok) {
                 addBubble(result.text, isUser = false)
@@ -218,7 +217,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
         addBubble("Reading file…", isUser = false)
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                JarvisLlmClient(apiKeyProvider = { BuildConfig.GROQ_API_KEY }).chat(combined)
+                JarvisLlmClient(apiKeyProvider = { SettingsManager(this@ChatActivity).getGroqApiKey() }).chat(combined)
             }
             if (result.ok) {
                 addBubble(result.text, isUser = false)

@@ -1,4 +1,3 @@
-import java.util.Properties
 import java.net.URL
 import java.security.MessageDigest
 
@@ -7,14 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Load API keys from local.properties (preferred for local builds) or environment variables (CI)
-val localProps = Properties().apply {
-    val f = rootProject.file("local.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
-}
-fun apiKey(name: String): String =
-    localProps.getProperty(name)?.trim().orEmpty()
-        .ifEmpty { System.getenv(name)?.trim().orEmpty() }
+// Provider secrets are entered in Settings and stored with Android Keystore encryption.
 
 android {
     namespace = "com.jarvis.assistant"
@@ -36,13 +28,13 @@ android {
 
         // Gemini / OpenWeather / Groq / Picovoice / ElevenLabs (human TTS)
         // Set in local.properties OR export as env vars / GitHub Actions secrets
-        buildConfigField("String", "GEMINI_API_KEY", "\"${apiKey("GEMINI_API_KEY")}\"")
-        buildConfigField("String", "OPENWEATHER_API_KEY", "\"${apiKey("OPENWEATHER_API_KEY")}\"")
-        buildConfigField("String", "GROQ_API_KEY", "\"${apiKey("GROQ_API_KEY")}\"")
-        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${apiKey("PICOVOICE_ACCESS_KEY")}\"")
-        buildConfigField("String", "ELEVENLABS_API_KEY", "\"${apiKey("ELEVENLABS_API_KEY")}\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"\"\"")
+        buildConfigField("String", "OPENWEATHER_API_KEY", "\"\"\"")
+        buildConfigField("String", "GROQ_API_KEY", "\"\"\"")
+        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"\"\"")
+        buildConfigField("String", "ELEVENLABS_API_KEY", "\"\"\"")
         // Optional: Voices → copy ID from https://elevenlabs.io/app/voice-library
-        buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"${apiKey("ELEVENLABS_VOICE_ID")}\"")
+        buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"\"\"")
     }
 
     buildTypes {
