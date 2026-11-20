@@ -164,39 +164,31 @@ class AssistantForegroundService : Service() {
         try { openWake?.stop() } catch (_: Exception) {}
         try { Thread.sleep(200) } catch (_: Exception) {}
 
-        // STT-only wake (OpenWake/Porcupine skipped until stable on device)
-        android.util.Log.w("JarvisService", "Using STT continuous wake — say Hey Jarvis")
-        startSttWakeFallback()
-    }
-
-    private fun startSttWakeFallback() {
-        val sm = com.jarvis.assistant.util.SettingsManager(this)
-        if (!sm.getBackgroundListen()) {
-            android.util.Log.i("JarvisService", "Background listen off — STT wake idle")
-            try { stt.stopContinuous() } catch (_: Exception) {}
-            return
-        }
-        android.util.Log.i("JarvisService", "STT continuous wake (Hey Jarvis)")
+        // Use the on-device OpenWakeWord model. Android SpeechRecognizer's
+        // continuous mode repeatedly opens the microphone and can emit a system
+        // mic-activation beep even when nobody speaks; never use it as a wake fallback.
         try {
-            stt.listenContinuous { trailing ->
+            val detector = com.jarvis.assistant.voice.OpenWakeWordEngine(applicationContext)
+            openWake = detector
+            val started = detector.start {
                 mainHandler.post {
-                    try { stt.stopContinuous() } catch (_: Exception) {}
-                    try { porcupine.stop() } catch (_: Exception) {}
-                    try { openWake?.stop() } catch (_: Exception) {}
-                    if (trailing.isNotBlank()) {
-                        handleUserSpeech(trailing)
-                    } else {
+                    if (!listenCycleRunning) {
+                        android.util.Log.i("JarvisService", "Hey Jarvis detected by on-device KWS")
                         startListeningCycle()
                     }
-                    mainHandler.postDelayed({
-                        if (com.jarvis.assistant.util.SettingsManager(this).getBackgroundListen()) {
-                            startWakeWordListening()
-                        }
-                    }, 5_000L)
                 }
             }
+            if (started) {
+                android.util.Log.i("JarvisService", "On-device OpenWakeWord armed; continuous STT disabled")
+                return
+            }
+            detector.stop()
+            openWake = null
+            android.util.Log.e("JarvisService", "On-device wake detector unavailable; microphone left idle (no STT beep fallback)")
         } catch (e: Exception) {
-            android.util.Log.e("JarvisService", "STT wake failed: ${e.message}")
+            try { openWake?.stop() } catch (_: Exception) {}
+            openWake = null
+            android.util.Log.e("JarvisService", "On-device wake start failed; microphone left idle", e)
         }
     }
 
