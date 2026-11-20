@@ -86,8 +86,13 @@ class DetectionLogic {
         // The classifier labels scores >0.5 as a candidate, but the runtime
         // trigger threshold is 0.55. Treat sub-threshold candidates as background
         // so they do not disappear from the adaptive noise estimate.
-        if (word == null || word.isEmpty() || prob < 0.55f) {
+        if (word == null || word.isEmpty()) {
             bg = bg * 0.995f + prob * 0.005f;
+        } else if (prob < 0.55f) {
+            // Candidate band is below the trigger threshold. Track it, but cap
+            // its contribution so repeated near-threshold noise cannot raise bg
+            // above one-third of a valid trigger score and permanently block L2.
+            bg = bg * 0.995f + Math.min(prob, 0.15f) * 0.005f;
         }
         rmsHist[ri] = rms;
         rmsTHist[ri] = now;
