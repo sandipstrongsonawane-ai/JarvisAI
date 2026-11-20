@@ -622,7 +622,7 @@ class SettingsActivity : AppCompatActivity() {
                     }
                     val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(5000) }
                     if (sample == null) {
-                        toast("Sample \${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
+                        toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
                         tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
                         return@launch
                     }
