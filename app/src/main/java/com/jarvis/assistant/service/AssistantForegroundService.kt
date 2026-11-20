@@ -39,7 +39,7 @@ import java.util.Calendar
 import com.jarvis.assistant.ai.JarvisLlmClient
 
 /**
- * Always-alive foreground service. The Voicute on-device wake engine calls
+ * Always-alive foreground service. The on-device wake detector calls
  * startListeningCycle() on wake, rather than this service polling continuously —
  * continuous SpeechRecognizer usage will drain battery fast and Android will kill it.
  *
@@ -61,7 +61,10 @@ class AssistantForegroundService : Service() {
     private lateinit var locationHelper: LocationHelper
     private lateinit var pcBridge: PcBridgeServer
     private lateinit var voiceAuth: com.jarvis.assistant.voice.VoiceAuthManager
-    private var voicuteWake: com.voicute.wakeword.VoicuteWakeWordEngine? = null
+    private lateinit var clapDetector: com.jarvis.assistant.voice.ClapDetector
+    private lateinit var porcupine: com.jarvis.assistant.voice.PorcupineWakeWord
+    private var openWake: com.jarvis.assistant.voice.OpenWakeWordEngine? = null
+    private var voiceSessionVerified = false
     private val scope = CoroutineScope(Dispatchers.Main)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var proactive: com.jarvis.assistant.util.ProactiveAlertManager? = null
@@ -71,18 +74,9 @@ class AssistantForegroundService : Service() {
             mainHandler.postDelayed(this, 5 * 60_000L)
         }
     }
-    @Volatile private var serviceDestroyed = false
-    private var wakeRetryAttempt = 0
-    private var wakeRetryPending = false
-    private val wakeRetryRunnable = Runnable {
-        wakeRetryPending = false
-        if (!serviceDestroyed && !listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
-    }
-
     var listener: AssistantListener? = null
     private var lastListenCycleMs = 0L
     private var listenCycleRunning = false
-    @Volatile private var wakeStartInProgress = false
 
     interface AssistantListener {
         fun onStateChanged(state: BrainState)
@@ -110,7 +104,9 @@ class AssistantForegroundService : Service() {
         locationHelper = LocationHelper(this)
         pcBridge = PcBridgeServer(this) { speech -> processSpeech(speech) }
         voiceAuth = com.jarvis.assistant.voice.VoiceAuthManager(this)
-        voicuteWake = com.voicute.wakeword.VoicuteWakeWordEngine(applicationContext)
+        clapDetector = com.jarvis.assistant.voice.ClapDetector()
+        try { clapDetector.stop() } catch (_: Exception) {}
+        porcupine = com.jarvis.assistant.voice.PorcupineWakeWord(this)
         offlineBrain = OfflineBrain(this, executor) { turnOn ->
             if (turnOn) pcBridge.start() else pcBridge.stop()
         }
@@ -148,101 +144,67 @@ class AssistantForegroundService : Service() {
     }
 
 
-    /** Stop the command STT and Voicute mic before switching microphone ownership. */
-    private fun scheduleWakeRetry() {
-        val sm = SettingsManager(this)
-        if (wakeRetryPending || listenCycleRunning ||
-            (!sm.getBackgroundListen() && !sm.getWakeWordEnabled())
-        ) return
-        val delays = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L, 30_000L)
-        val delay = delays[wakeRetryAttempt.coerceIn(0, delays.lastIndex)]
-        wakeRetryAttempt = (wakeRetryAttempt + 1).coerceAtMost(delays.lastIndex)
-        wakeRetryPending = true
-        android.util.Log.w("JarvisService", "Scheduling Voicute recovery retry in ${delay}ms")
-        mainHandler.postDelayed(wakeRetryRunnable, delay)
-    }
-
+    /** Stop every continuous mic owner (OpenWakeWord, Porcupine, Google STT continuous). */
     private fun releaseAllMics() {
-        try { voicuteWake?.stop() } catch (_: Exception) {}
-        
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
         try { stt.stopContinuous() } catch (_: Exception) {}
+        try { clapDetector.stop() } catch (_: Exception) {}
     }
 
-    /**
-     * Background wake detection is strictly on-device.
-     * SpeechRecognizer is only started after the wake engine detects "Hey Jarvis".
-     * No continuous Google STT fallback: it causes repeated Android mic activation tones.
-     */
     private fun startWakeWordListening() {
-        val sm = SettingsManager(this)
+        val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             android.util.Log.i("JarvisService", "Wake off in settings")
-            mainHandler.removeCallbacks(wakeRetryRunnable)
-            wakeRetryPending = false
-            releaseAllMics()
             return
         }
-        if (androidx.core.content.ContextCompat.checkSelfPermission(
-                this,
-                android.Manifest.permission.RECORD_AUDIO
-            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            android.util.Log.w("JarvisService", "Wake start skipped: microphone permission missing")
-            releaseAllMics()
-            return
-        }
-        if (listenCycleRunning || wakeStartInProgress) return
-
-        // Ensure only one microphone owner is active.
+        listenCycleRunning = false
         try { stt.stopContinuous() } catch (_: Exception) {}
-        
-        try { voicuteWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { Thread.sleep(200) } catch (_: Exception) {}
 
-        val onWake: () -> Unit = {
-            mainHandler.post {
-                if (!serviceDestroyed && !listenCycleRunning) {
-                    android.util.Log.i("JarvisService", "On-device wake detected — opening command STT")
-                    try { voicuteWake?.stop() } catch (_: Exception) {}
-                    
-                    startListeningCycle()
-                }
-            }
+        // STT-only wake (OpenWake/Porcupine skipped until stable on device)
+        android.util.Log.w("JarvisService", "Using STT continuous wake — say Hey Jarvis")
+        startSttWakeFallback()
+    }
+
+    private fun startSttWakeFallback() {
+        val sm = com.jarvis.assistant.util.SettingsManager(this)
+        if (!sm.getBackgroundListen()) {
+            android.util.Log.i("JarvisService", "Background listen off — STT wake idle")
+            try { stt.stopContinuous() } catch (_: Exception) {}
+            return
         }
-
-        // AudioRecord initialization is awaited by the adapter. Run that wait off
-        // the main thread so a slow/busy microphone cannot freeze the service UI.
-        wakeStartInProgress = true
-        scope.launch(Dispatchers.IO) {
-            val voicuteStarted = try {
-                val started = voicuteWake?.start(onWake) {
-                    mainHandler.post {
-                        if (!serviceDestroyed) {
-                            wakeStartInProgress = false
-                            if (!listenCycleRunning) scheduleWakeRetry()
-                        }
-                    }
-                } == true
-                started && voicuteWake?.isRunning() == true
-            } catch (e: Exception) {
-                android.util.Log.e("JarvisService", "Voicute wake start failed: ${e.message}", e)
-                false
-            }
-            mainHandler.post {
-                if (serviceDestroyed) return@post
-                wakeStartInProgress = false
-                if (voicuteStarted) {
-                    wakeRetryAttempt = 0
-                    mainHandler.removeCallbacks(wakeRetryRunnable)
-                    wakeRetryPending = false
-                    android.util.Log.i("JarvisService", "Voicute on-device wake active — Hey Jarvis")
-                } else {
-                    android.util.Log.e("JarvisService", "Voicute microphone/model unavailable; scheduling recovery retry")
+        android.util.Log.i("JarvisService", "STT continuous wake (Hey Jarvis)")
+        try {
+            stt.listenContinuous { trailing ->
+                mainHandler.post {
                     try { stt.stopContinuous() } catch (_: Exception) {}
-                    scheduleWakeRetry()
+                    try { porcupine.stop() } catch (_: Exception) {}
+                    try { openWake?.stop() } catch (_: Exception) {}
+                    if (trailing.isNotBlank()) {
+                        handleUserSpeech(trailing)
+                    } else {
+                        startListeningCycle()
+                    }
+                    mainHandler.postDelayed({
+                        if (com.jarvis.assistant.util.SettingsManager(this).getBackgroundListen()) {
+                            startWakeWordListening()
+                        }
+                    }, 5_000L)
                 }
             }
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisService", "STT wake failed: ${e.message}")
         }
     }
+
+
+
+
+
+
 
     /** Text chat — same offline-first pipeline as voice. */
     fun submitText(text: String) {
@@ -254,7 +216,8 @@ class AssistantForegroundService : Service() {
 
     private fun forceReleaseCommandMic() {
         try { stt.stopContinuous() } catch (_: Exception) {}
-        try { voicuteWake?.stop() } catch (_: Exception) {}
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
         
         listenCycleRunning = false
         try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
@@ -291,7 +254,8 @@ class AssistantForegroundService : Service() {
     private fun startFollowUpListen() {
         mainHandler.postDelayed({
             if (listenCycleRunning) return@postDelayed
-            try { voicuteWake?.stop() } catch (_: Exception) {}
+            try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
             
             try { stt.stopContinuous() } catch (_: Exception) {}
             listenCycleRunning = true
@@ -356,7 +320,8 @@ class AssistantForegroundService : Service() {
         // A manual tap interrupts any current TTS reply and takes control immediately.
         try { tts.stop() } catch (_: Exception) {}
         // Hold wake engines OFF for entire command window
-        try { voicuteWake?.stop() } catch (_: Exception) {}
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
         
         try { stt.stopContinuous() } catch (_: Exception) {}
         // Note: do not removeCallbacksAndMessages(null) — that kills proactive timers.
@@ -370,7 +335,8 @@ class AssistantForegroundService : Service() {
 
         // Personal wake acknowledgement — always address the user as Sagar.
         val ack = "Ji Sagar"
-        try { voicuteWake?.stop() } catch (_: Exception) {}
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
         
         try { tts.speak(ack) } catch (_: Exception) {}
 
@@ -389,7 +355,8 @@ class AssistantForegroundService : Service() {
 
         fun beginStt(retry: Boolean = false) {
             try {
-                try { voicuteWake?.stop() } catch (_: Exception) {}
+                try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
                 
                 stt.listenOnce(
                     onResult = { speech ->
@@ -892,15 +859,16 @@ class AssistantForegroundService : Service() {
     override fun onDestroy() {
         // Prevent late IO/start callbacks or command coroutines from reviving work
         // after Android has destroyed this foreground service.
-        serviceDestroyed = true
         scope.cancel()
-        try { voicuteWake?.stop() } catch (_: Exception) {}
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
         try { callAnnouncer?.stop() } catch (_: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
-        wakeRetryPending = false
         proactive?.stop()
         proactive = null
-        try { voicuteWake?.release() } catch (_: Exception) {}
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
+        try { clapDetector.stop() } catch (_: Exception) {}
         stt.stopContinuous()
         stt.destroy()
         tts.shutdown()
