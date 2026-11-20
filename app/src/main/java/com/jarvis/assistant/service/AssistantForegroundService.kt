@@ -139,8 +139,11 @@ class AssistantForegroundService : Service() {
             val action = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION).orEmpty()
             val target = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET)
             val message = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE)
+            val commandJson = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON)
             scope.launch {
-                val command = com.jarvis.assistant.model.AssistantCommand(action, target, message)
+                val command = commandJson?.let { raw ->
+                    try { commandFromJson(org.json.JSONObject(raw)) } catch (_: Exception) { null }
+                } ?: com.jarvis.assistant.model.AssistantCommand(action, target, message)
                 val result = try {
                     executeAssistantCommand(command, confirmed = true)
                 } catch (e: Exception) {
@@ -598,6 +601,10 @@ class AssistantForegroundService : Service() {
                     putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, command.action)
                     putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, command.target)
                     putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, command.message)
+                    putExtra(
+                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON,
+                        commandToJson(command).toString()
+                    )
                     putStringArrayListExtra(
                         com.jarvis.assistant.RuntimePermissionActivity.EXTRA_PERMISSIONS,
                         ArrayList(missingPermissions)
@@ -618,6 +625,43 @@ class AssistantForegroundService : Service() {
             }
         }
         return if (confirmed) executor.executeConfirmed(command) else executor.execute(command)
+    }
+
+    private fun commandToJson(command: com.jarvis.assistant.model.AssistantCommand): org.json.JSONObject {
+        val json = org.json.JSONObject()
+            .put("action", command.action)
+            .put("target", command.target)
+            .put("message", command.message)
+        val extra = org.json.JSONObject()
+        command.extra.forEach { (key, value) -> extra.put(key, value) }
+        json.put("extra", extra)
+        command.steps?.let { steps ->
+            val array = org.json.JSONArray()
+            steps.forEach { array.put(commandToJson(it)) }
+            json.put("steps", array)
+        }
+        return json
+    }
+
+    private fun commandFromJson(json: org.json.JSONObject): com.jarvis.assistant.model.AssistantCommand {
+        val extra = linkedMapOf<String, String>()
+        json.optJSONObject("extra")?.let { values ->
+            val keys = values.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                extra[key] = values.optString(key)
+            }
+        }
+        val steps = json.optJSONArray("steps")?.let { array ->
+            (0 until array.length()).map { commandFromJson(array.getJSONObject(it)) }
+        }
+        return com.jarvis.assistant.model.AssistantCommand(
+            action = json.optString("action"),
+            target = json.optString("target").takeUnless { it.isBlank() || it == "null" },
+            message = json.optString("message").takeUnless { it.isBlank() || it == "null" },
+            extra = extra,
+            steps = steps
+        )
     }
 
     private fun requiredRuntimePermissions(command: com.jarvis.assistant.model.AssistantCommand): List<String> {
