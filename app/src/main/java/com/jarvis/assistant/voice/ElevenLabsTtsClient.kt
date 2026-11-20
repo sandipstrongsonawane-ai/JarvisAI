@@ -67,6 +67,7 @@ class ElevenLabsTtsClient(private val context: Context) {
         // Free tier: keep requests short
         val clipped = if (cleaned.length > 2500) cleaned.take(2500) else cleaned
 
+        var requestCall: okhttp3.Call? = null
         try {
             val bodyJson = JSONObject().apply {
                 put("text", clipped)
@@ -87,6 +88,7 @@ class ElevenLabsTtsClient(private val context: Context) {
                 .build()
 
             val call = client.newCall(request)
+            requestCall = call
             activeCall.set(call)
             if (requestGeneration.get() != generation) {
                 activeCall.compareAndSet(call, null)
@@ -118,40 +120,36 @@ class ElevenLabsTtsClient(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "ElevenLabs speak failed: ${e.message}", e)
             false
+        } finally {
+            requestCall?.let { activeCall.compareAndSet(it, null) }
         }
     }
 
     private fun playFile(file: File): Boolean {
+        val newPlayer = MediaPlayer()
         return try {
-            player = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                setDataSource(file.absolutePath)
-                setOnCompletionListener {
-                    try {
-                        it.release()
-                    } catch (_: Exception) {
-                    }
-                    if (player === it) player = null
-                }
-                setOnErrorListener { mp, _, _ ->
-                    try {
-                        mp.release()
-                    } catch (_: Exception) {
-                    }
-                    if (player === mp) player = null
-                    true
-                }
-                prepare()
-                start()
+            player = newPlayer
+            newPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            newPlayer.setDataSource(file.absolutePath)
+            newPlayer.setOnCompletionListener {
+                try { it.release() } catch (_: Exception) {}
+                if (player === it) player = null
             }
+            newPlayer.setOnErrorListener { mp, _, _ ->
+                try { mp.release() } catch (_: Exception) {}
+                if (player === mp) player = null
+                true
+            }
+            newPlayer.prepare()
+            newPlayer.start()
             newPlayer.isPlaying
         } catch (e: Exception) {
-            Log.e(TAG, "MediaPlayer failed: ${e.message}")
+            Log.e(TAG, "MediaPlayer failed: ${e.message}", e)
             if (player === newPlayer) player = null
             try { newPlayer.reset() } catch (_: Exception) {}
             try { newPlayer.release() } catch (_: Exception) {}
