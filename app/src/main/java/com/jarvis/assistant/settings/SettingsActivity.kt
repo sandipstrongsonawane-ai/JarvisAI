@@ -9,6 +9,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Build
+import android.net.Uri
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
@@ -261,7 +263,27 @@ class SettingsActivity : AppCompatActivity() {
             })
         })
 
-        // Do not force a male voice here. TTS follows the Android engine's default voice.
+        root.addView(sectionCard {
+            addView(sectionTitle("Puppy Companion"))
+            addView(bodyText("Enable the movable puppy overlay. Android asks for a separate display-over-other-apps permission."))
+            addView(hudButton("ENABLE PUPPY OVERLAY") {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this@SettingsActivity)) {
+                    try {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                        toast("Could not open overlay permission settings.")
+                    }
+                } else {
+                    com.jarvis.assistant.ui.PuppyOverlay.show(applicationContext)
+                    toast("Puppy companion enabled.")
+                }
+            })
+        })
 
         root.addView(sectionCard {
             addView(sectionTitle("Voice Speed"))

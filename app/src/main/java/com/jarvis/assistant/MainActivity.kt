@@ -9,6 +9,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Build
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -292,11 +295,39 @@ class MainActivity : AppCompatActivity(),
         com.jarvis.assistant.ui.HudController.addListener(this)
         // Attach the optional companion only after the launcher activity is foregrounded.
         try {
-            com.jarvis.assistant.ui.PuppyOverlay.show(applicationContext)
+            ensurePuppyOverlay()
         } catch (_: Exception) {
             // A companion overlay must never prevent the main assistant from opening.
         }
         if (::settings.isInitialized) scheduleFeedbackPromptCheck()
+    }
+
+    private fun ensurePuppyOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            val prefs = getSharedPreferences("jarvis_ui", MODE_PRIVATE)
+            if (!prefs.getBoolean("puppy_overlay_prompted", false)) {
+                prefs.edit().putBoolean("puppy_overlay_prompted", true).apply()
+                AlertDialog.Builder(this)
+                    .setTitle("Enable Puppy Companion")
+                    .setMessage("Allow Jarvis to show the small movable puppy over other apps. This is only for the puppy overlay.")
+                    .setPositiveButton("Open settings") { _, _ ->
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:$packageName")
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "Could not open overlay permission settings.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    .setNegativeButton("Not now", null)
+                    .show()
+            }
+            return
+        }
+        com.jarvis.assistant.ui.PuppyOverlay.show(applicationContext)
     }
 
     override fun onDestroy() {
