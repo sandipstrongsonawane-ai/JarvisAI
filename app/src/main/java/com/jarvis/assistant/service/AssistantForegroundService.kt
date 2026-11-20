@@ -338,58 +338,6 @@ class AssistantForegroundService : Service() {
 
 
 
-    /**
-     * Siri-style: after answering, keep a short follow-up window so the user can
-     * speak the next command without saying "Hey Jarvis" again.
-     */
-    private fun startFollowUpListen() {
-        if (externalMicSessionActive) return
-        mainHandler.postDelayed({
-            if (externalMicSessionActive) return@postDelayed
-            if (listenCycleRunning) return@postDelayed
-            try { openWake?.stop() } catch (_: Exception) {}
-        try { porcupine.stop() } catch (_: Exception) {}
-            
-            try { stt.stopContinuous() } catch (_: Exception) {}
-            listenCycleRunning = true
-            lastListenCycleMs = System.currentTimeMillis()
-            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
-            try { com.jarvis.assistant.ui.ActivationEdgeOverlay.show(this@AssistantForegroundService) } catch (_: Exception) {}
-            listener?.onStateChanged(BrainState.LISTENING)
-            try {
-                stt.listenOnce(
-                    onResult = { speech ->
-                        listenCycleRunning = false
-                        try { stt.stopContinuous() } catch (_: Exception) {}
-                        val s = speech.trim()
-                        val cancel = s.equals("stop", true) || s.equals("cancel", true) ||
-                            s.equals("never mind", true) || s.equals("nevermind", true) ||
-                            s.equals("bas", true) || s.equals("cancel karo", true)
-                        if (s.isNotBlank() && !cancel) {
-                            handleUserSpeech(s)
-                        } else {
-                            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
-                            try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
-                            listener?.onStateChanged(BrainState.IDLE)
-                            resumeWakeSoon(600L)
-                        }
-                    },
-                    onError = {
-                        listenCycleRunning = false
-                        try { stt.stopContinuous() } catch (_: Exception) {}
-                        try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
-                        try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
-                        listener?.onStateChanged(BrainState.IDLE)
-                        resumeWakeSoon(600L)
-                    }
-                )
-            } catch (_: Exception) {
-                listenCycleRunning = false
-                resumeWakeSoon(600L)
-            }
-        }, 2200L) // after reply TTS starts
-    }
-
     fun startListeningCycle() {
         if (externalMicSessionActive) {
             android.util.Log.i("JarvisService", "Listening cycle blocked: external microphone session active")
@@ -552,8 +500,14 @@ class AssistantForegroundService : Service() {
                 android.util.Log.w("JarvisService", "TTS completion timed out; stopping playback before listening")
                 tts.stop()
             }
-            // Keep the follow-up window without requiring a second wake phrase.
-            if (!listenCycleRunning) startFollowUpListen()
+            // Standby must return to the on-device wake microphone, not a one-shot
+            // SpeechRecognizer follow-up session. Re-arm OpenWakeWord after every reply.
+            if (!listenCycleRunning && !externalMicSessionActive) {
+                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+                try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
+                listener?.onStateChanged(BrainState.IDLE)
+                resumeWakeSoon(700L)
+            }
         }
     }
 
