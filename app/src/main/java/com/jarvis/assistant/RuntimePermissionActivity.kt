@@ -56,8 +56,8 @@ class RuntimePermissionActivity : AppCompatActivity() {
     }
 
     private fun resumePendingCommand() {
-        val action = intent.getStringExtra(EXTRA_ACTION)
-        if (action.isNullOrBlank()) {
+        val actionKey = intent.getStringExtra(EXTRA_ACTION)
+        if (actionKey.isNullOrBlank()) {
             Toast.makeText(this, "Pending Jarvis action was missing.", Toast.LENGTH_LONG).show()
             finish()
             return
@@ -66,7 +66,7 @@ class RuntimePermissionActivity : AppCompatActivity() {
         val command = rawCommand?.let {
             try { commandFromJson(org.json.JSONObject(it)) } catch (_: Exception) { null }
         } ?: com.jarvis.assistant.model.AssistantCommand(
-            action,
+            actionKey,
             intent.getStringExtra(EXTRA_TARGET),
             intent.getStringExtra(EXTRA_MESSAGE)
         )
