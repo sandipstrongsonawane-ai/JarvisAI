@@ -17,7 +17,7 @@ class VoicuteWakeWordEngine(context: Context) {
     private val detection = DetectionLogic()
 
     @Synchronized
-    fun start(onWake: () -> Unit): Boolean {
+    fun start(onWake: () -> Unit, onError: (() -> Unit)? = null): Boolean {
         stop()
         val activeEngine = engine ?: WakeWordEngine(appContext).also { engine = it }
         if (!activeEngine.isLoaded) {
@@ -28,7 +28,10 @@ class VoicuteWakeWordEngine(context: Context) {
         }
 
         val activeCapture = AudioCapture()
-        activeCapture.setListener { message -> Log.e(TAG, "Voicute microphone error: $message") }
+        activeCapture.setListener { message ->
+            Log.e(TAG, "Voicute microphone error: $message")
+            onError?.invoke()
+        }
         val gates = detection
         capture = activeCapture
         if (!activeCapture.start()) {
@@ -84,7 +87,10 @@ class VoicuteWakeWordEngine(context: Context) {
             } catch (interrupted: InterruptedException) {
                 Thread.currentThread().interrupt()
             } catch (error: Exception) {
+                running = false
                 Log.e(TAG, "Voicute inference loop failed", error)
+                try { activeCapture.stop() } catch (_: Exception) {}
+                onError?.invoke()
             }
         }, "VoicuteInference").also {
             it.isDaemon = true

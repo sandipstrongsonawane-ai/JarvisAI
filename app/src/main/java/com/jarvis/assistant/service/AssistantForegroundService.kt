@@ -71,6 +71,12 @@ class AssistantForegroundService : Service() {
             mainHandler.postDelayed(this, 5 * 60_000L)
         }
     }
+    private var wakeRetryAttempt = 0
+    private var wakeRetryPending = false
+    private val wakeRetryRunnable = Runnable {
+        wakeRetryPending = false
+        if (!listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
+    }
 
     var listener: AssistantListener? = null
     private var lastListenCycleMs = 0L
@@ -149,6 +155,19 @@ class AssistantForegroundService : Service() {
 
 
     /** Stop every continuous mic owner (OpenWakeWord, Porcupine, Google STT continuous). */
+    private fun scheduleWakeRetry() {
+        val sm = SettingsManager(this)
+        if (wakeRetryPending || listenCycleRunning ||
+            (!sm.getBackgroundListen() && !sm.getWakeWordEnabled())
+        ) return
+        val delays = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L, 30_000L)
+        val delay = delays[wakeRetryAttempt.coerceIn(0, delays.lastIndex)]
+        wakeRetryAttempt = (wakeRetryAttempt + 1).coerceAtMost(delays.lastIndex)
+        wakeRetryPending = true
+        android.util.Log.w("JarvisService", "Scheduling Voicute recovery retry in ${delay}ms")
+        mainHandler.postDelayed(wakeRetryRunnable, delay)
+    }
+
     private fun releaseAllMics() {
         try { voicuteWake?.stop() } catch (_: Exception) {}
         
@@ -165,6 +184,17 @@ class AssistantForegroundService : Service() {
         val sm = SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             android.util.Log.i("JarvisService", "Wake off in settings")
+            mainHandler.removeCallbacks(wakeRetryRunnable)
+            wakeRetryPending = false
+            releaseAllMics()
+            return
+        }
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.w("JarvisService", "Wake start skipped: microphone permission missing")
             releaseAllMics()
             return
         }
@@ -191,7 +221,12 @@ class AssistantForegroundService : Service() {
         wakeStartInProgress = true
         scope.launch(Dispatchers.IO) {
             val voicuteStarted = try {
-                voicuteWake?.start(onWake) == true
+                voicuteWake?.start(onWake) {
+                    mainHandler.post {
+                        wakeStartInProgress = false
+                        if (!listenCycleRunning) scheduleWakeRetry()
+                    }
+                } == true
             } catch (e: Exception) {
                 android.util.Log.e("JarvisService", "Voicute wake start failed: ${e.message}", e)
                 false
@@ -199,10 +234,14 @@ class AssistantForegroundService : Service() {
             mainHandler.post {
                 wakeStartInProgress = false
                 if (voicuteStarted) {
+                    wakeRetryAttempt = 0
+                    mainHandler.removeCallbacks(wakeRetryRunnable)
+                    wakeRetryPending = false
                     android.util.Log.i("JarvisService", "Voicute on-device wake active — Hey Jarvis")
                 } else {
-                    android.util.Log.e("JarvisService", "Voicute microphone/model unavailable; no fallback engine will be started")
+                    android.util.Log.e("JarvisService", "Voicute microphone/model unavailable; scheduling recovery retry")
                     try { stt.stopContinuous() } catch (_: Exception) {}
+                    scheduleWakeRetry()
                 }
             }
         }
@@ -841,6 +880,7 @@ class AssistantForegroundService : Service() {
         try { voicuteWake?.stop() } catch (_: Exception) {}
         try { callAnnouncer?.stop() } catch (_: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
+        wakeRetryPending = false
         proactive?.stop()
         proactive = null
         try { voicuteWake?.release() } catch (_: Exception) {}
