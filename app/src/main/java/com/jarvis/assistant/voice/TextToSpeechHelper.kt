@@ -3,75 +3,97 @@ package com.jarvis.assistant.voice
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import com.jarvis.assistant.util.SettingsManager
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
- * JARVIS TTS — Piper first, Android system TTS always as fallback.
- * Never goes fully mute if the device has any TTS engine.
+ * Female-first Android TTS. Cloud/API text is spoken through this same path.
+ * The bundled Piper model is male-only, so it is intentionally not selected.
  */
 class TextToSpeechHelper(context: Context) {
-
     private val app = context.applicationContext
     private val settings = SettingsManager(app)
-    private val piper = PiperTtsEngine(app)
-
     private var androidTts: TextToSpeech? = null
     private val androidReady = AtomicBoolean(false)
+    private val androidSpeechActive = AtomicBoolean(false)
+    @Volatile private var activeAndroidUtteranceId: String? = null
+    private val cloudRequestActive = AtomicBoolean(false)
+    private val speechGeneration = AtomicInteger(0)
+    private val cloudTts = ElevenLabsTtsClient(app)
+    private val speechScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var pending: String? = null
 
     init {
+        // The user explicitly requested a female default; migrate the old male default.
+        if (settings.getVoiceType() != "female") settings.setVoiceType("female")
         androidTts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 androidReady.set(true)
                 configureAndroidVoice()
-                pending?.let { t ->
+                pending?.let { queued ->
                     pending = null
-                    speak(t)
+                    speak(queued)
                 }
-                Log.i(TAG, "Android TTS ready (fallback)")
+                Log.i(TAG, "Android TTS ready")
             } else {
                 Log.e(TAG, "Android TTS init failed: $status")
             }
         }
         androidTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {}
+            override fun onStart(utteranceId: String?) {
+                if (utteranceId == activeAndroidUtteranceId) androidSpeechActive.set(true)
+            }
+            override fun onDone(utteranceId: String?) {
+                finishAndroidUtterance(utteranceId)
+            }
             override fun onError(utteranceId: String?) {
+                finishAndroidUtterance(utteranceId)
                 Log.e(TAG, "Android TTS utterance error")
             }
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                finishAndroidUtterance(utteranceId)
+            }
         })
-        if (piper.isReady) Log.i(TAG, "Piper available")
-        else Log.w(TAG, "Piper not ready — using Android TTS fallback")
     }
 
     fun speak(text: String) {
-        val cleaned = text
-            .replace("...", ", ")
+        val cleaned = text.replace("...", ", ")
             .replace(" — ", ", ")
             .replace(" – ", ", ")
             .trim()
         if (cleaned.isEmpty()) return
-
-        // Prefer Piper when native stack is ready
-        if (piper.isReady) {
-            try {
-                piper.stop()
-                val ok = piper.speak(cleaned)
-                if (ok) {
-                    Log.i(TAG, "Spoke via Piper")
-                    return
+        val generation = speechGeneration.incrementAndGet()
+        if (settings.getPreferCloudVoice() && cloudTts.isConfigured) {
+            cloudRequestActive.set(true)
+            speechScope.launch {
+                try {
+                    // Cancel any older cloud request before starting this utterance.
+                    cloudTts.stop()
+                    stopAndroidSpeech()
+                    val started = cloudTts.speak(cleaned)
+                    if (!started && generation == speechGeneration.get()) {
+                        Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
+                        speakAndroid(cleaned)
+                    }
+                } finally {
+                    if (generation == speechGeneration.get()) cloudRequestActive.set(false)
                 }
-                Log.w(TAG, "Piper speak failed — falling back to Android TTS")
-            } catch (e: Exception) {
-                Log.e(TAG, "Piper error: ${e.message}")
             }
+        } else {
+            cloudTts.stop()
+            cloudRequestActive.set(false)
+            speakAndroid(cleaned)
         }
-
-        speakAndroid(cleaned)
     }
 
     private fun speakAndroid(text: String) {
@@ -82,54 +104,102 @@ class TextToSpeechHelper(context: Context) {
             return
         }
         try {
-            configureAndroidVoice()
-            tts.stop()
+            stopAndroidSpeech()
+            if (!configureAndroidVoice(text)) {
+                Log.e(TAG, "No female Android voice is installed; refusing male/default voice fallback")
+                return
+            }
             val id = UUID.randomUUID().toString()
-            val r = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
-            if (r == TextToSpeech.ERROR) Log.e(TAG, "Android speak ERROR")
-            else Log.i(TAG, "Spoke via Android TTS")
+            activeAndroidUtteranceId = id
+            androidSpeechActive.set(true)
+            val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            if (result == TextToSpeech.ERROR) {
+                finishAndroidUtterance(id)
+                Log.e(TAG, "Android speak ERROR")
+            } else {
+                Log.i(TAG, "Spoke using female-first Android voice locale=${ReplyLanguageDetector.detect(text)}")
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Android speak failed: ${e.message}")
+            activeAndroidUtteranceId = null
+            androidSpeechActive.set(false)
+            Log.e(TAG, "Android speak failed: ${e.message}", e)
         }
     }
 
-    private fun configureAndroidVoice() {
-        val tts = androidTts ?: return
-        try {
-            // Prefer UK English male-ish system voice when available
-            tts.language = Locale.UK
-            val voices = try { tts.voices } catch (_: Exception) { null }
-            if (voices != null) {
-                val male = voices.firstOrNull { v ->
-                    val n = v.name.lowercase()
-                    (n.contains("male") || n.contains("gb") || n.contains("uk")) &&
-                        !n.contains("female") &&
-                        v.locale.language == "en"
-                } ?: voices.firstOrNull {
-                    it.locale.language == "en" && !it.name.lowercase().contains("female")
-                }
-                if (male != null) tts.voice = male
-            }
-            val speed = settings.getVoiceSpeed().coerceIn(0.7f, 1.4f)
-            val pitch = settings.getVoicePitch().coerceIn(0.8f, 1.2f)
-            tts.setSpeechRate(speed)
-            tts.setPitch(pitch)
-        } catch (e: Exception) {
-            Log.w(TAG, "configureAndroidVoice: ${e.message}")
+    private fun finishAndroidUtterance(utteranceId: String?) {
+        if (utteranceId != null && utteranceId == activeAndroidUtteranceId) {
+            activeAndroidUtteranceId = null
+            androidSpeechActive.set(false)
         }
     }
+
+    private fun stopAndroidSpeech() {
+        activeAndroidUtteranceId = null
+        androidSpeechActive.set(false)
+        try { androidTts?.stop() } catch (_: Exception) {}
+    }
+
+    private fun configureAndroidVoice(text: String = ""): Boolean {
+        val tts = androidTts ?: return false
+        return try {
+            val locale = ReplyLanguageDetector.detect(text)
+            val languageResult = tts.setLanguage(locale)
+            val voices = tts.voices.orEmpty()
+            val femaleVoice = voices
+                .filter { voiceNameSuggestsFeminine(it.name) }
+                .filter { it.locale.language.equals(locale.language, ignoreCase = true) }
+                .maxByOrNull { it.quality }
+                ?: voices
+                    .filter { voiceNameSuggestsFeminine(it.name) }
+                    .filter { it.locale.language.equals("en", ignoreCase = true) }
+                    .maxByOrNull { it.quality }
+
+            if (femaleVoice == null) {
+                Log.w(TAG, "No female Android voice installed for locale=$locale; languageResult=$languageResult")
+                false
+            } else {
+                tts.voice = femaleVoice
+                tts.setLanguage(femaleVoice.locale)
+                Log.i(TAG, "Selected female TTS voice=${femaleVoice.name} locale=${femaleVoice.locale}")
+                tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
+                tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
+                true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "configureAndroidVoice: ${e.message}", e)
+            false
+        }
+    }
+
+    private fun voiceNameSuggestsFeminine(name: String): Boolean {
+        val lower = name.lowercase(Locale.ROOT)
+        return listOf(
+            "female", "woman", "feminine", "samantha", "zira", "jenny",
+            "aria", "sara", "karen", "moira", "tessa", "susan", "veena",
+            "lekha", "neerja", "hi-in-x-hia", "en-in-x-ene", "en-in-x-ena",
+            "en-us-x-sfg", "en-us-x-tpf"
+        ).any { lower.contains(it) }
+    }
+
+    fun isSpeaking(): Boolean =
+        cloudRequestActive.get() ||
+            cloudTts.isPlaying() ||
+            androidSpeechActive.get() ||
+            pending != null
 
     fun stop() {
-        try { piper.stop() } catch (_: Exception) {}
-        try { androidTts?.stop() } catch (_: Exception) {}
+        speechGeneration.incrementAndGet()
+        pending = null
+        cloudRequestActive.set(false)
+        androidSpeechActive.set(false)
+        try { cloudTts.stop() } catch (_: Exception) {}
+        stopAndroidSpeech()
     }
 
     fun shutdown() {
         stop()
-        try { piper.release() } catch (_: Exception) {}
-        try {
-            androidTts?.shutdown()
-        } catch (_: Exception) {}
+        speechScope.cancel()
+        try { androidTts?.shutdown() } catch (_: Exception) {}
         androidTts = null
         androidReady.set(false)
     }

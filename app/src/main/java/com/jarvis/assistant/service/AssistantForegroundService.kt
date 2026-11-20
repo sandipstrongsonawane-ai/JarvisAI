@@ -1,6 +1,5 @@
 package com.jarvis.assistant.service
 
-import com.jarvis.assistant.BuildConfig
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -17,6 +16,7 @@ import com.jarvis.assistant.ai.GeminiClient
 import com.jarvis.assistant.brain.BrainState
 import com.jarvis.assistant.brain.OfflineBrain
 import com.jarvis.assistant.executor.CommandExecutor
+import com.jarvis.assistant.executor.RiskConfirmGate
 import com.jarvis.assistant.network.PcBridgeServer
 import com.jarvis.assistant.util.FileFinder
 import com.jarvis.assistant.util.LocationHelper
@@ -30,11 +30,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import java.util.Calendar
 import com.jarvis.assistant.ai.JarvisLlmClient
 
 /**
- * Always-alive foreground service. Wake-word detection (Porcupine) should call
+ * Always-alive foreground service. The on-device wake detector calls
  * startListeningCycle() on wake, rather than this service polling continuously —
  * continuous SpeechRecognizer usage will drain battery fast and Android will kill it.
  *
@@ -46,7 +51,6 @@ import com.jarvis.assistant.ai.JarvisLlmClient
 class AssistantForegroundService : Service() {
 
     private lateinit var stt: SpeechToText
-    private lateinit var clapDetector: com.jarvis.assistant.voice.ClapDetector
     private var callAnnouncer: com.jarvis.assistant.util.IncomingCallAnnouncer? = null
     private lateinit var tts: TextToSpeechHelper
     private lateinit var executor: CommandExecutor
@@ -57,6 +61,7 @@ class AssistantForegroundService : Service() {
     private lateinit var locationHelper: LocationHelper
     private lateinit var pcBridge: PcBridgeServer
     private lateinit var voiceAuth: com.jarvis.assistant.voice.VoiceAuthManager
+    private lateinit var clapDetector: com.jarvis.assistant.voice.ClapDetector
     private lateinit var porcupine: com.jarvis.assistant.voice.PorcupineWakeWord
     private var openWake: com.jarvis.assistant.voice.OpenWakeWordEngine? = null
     private var voiceSessionVerified = false
@@ -69,10 +74,13 @@ class AssistantForegroundService : Service() {
             mainHandler.postDelayed(this, 5 * 60_000L)
         }
     }
-
     var listener: AssistantListener? = null
     private var lastListenCycleMs = 0L
     private var listenCycleRunning = false
+    @Volatile private var externalMicSessionActive = false
+    private var wakeResumeRetryAttempt = 0
+    private var wakeResumeRetryPosted = false
+    private var wakeStartGeneration = 0
 
     interface AssistantListener {
         fun onStateChanged(state: BrainState)
@@ -83,6 +91,9 @@ class AssistantForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "jarvis_channel"
         const val NOTIF_ID = 101
+        const val ACTION_EXECUTE_DEFERRED_COMMAND = "com.jarvis.assistant.EXECUTE_DEFERRED_COMMAND"
+        const val ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC = "com.jarvis.assistant.PAUSE_WAKE_FOR_EXTERNAL_MIC"
+        const val ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC = "com.jarvis.assistant.RESUME_WAKE_AFTER_EXTERNAL_MIC"
     }
 
     override fun onCreate() {
@@ -90,23 +101,18 @@ class AssistantForegroundService : Service() {
         stt = SpeechToText(this)
         // Hard stop any residual continuous STT from previous process death
         try { stt.stopContinuous() } catch (_: Exception) {}
-        clapDetector = com.jarvis.assistant.voice.ClapDetector()
-        val smBoot = com.jarvis.assistant.util.SettingsManager(this)
-        // Mic must NOT open until clap / Porcupine wake / explicit Listen button.
-        // Clap wake is OFF by default so AudioRecord does not hold the mic at boot.
-        // Clap wake disabled — continuous mic not allowed in background
-        android.util.Log.i("JarvisService", "Clap wake skipped (no background mic)")
-        try { clapDetector.stop() } catch (_: Exception) {}
         tts = TextToSpeechHelper(this)
         callAnnouncer = com.jarvis.assistant.util.IncomingCallAnnouncer(this) { tts }
         try { callAnnouncer?.start() } catch (_: Exception) {}
         executor = CommandExecutor(this)
-        gemini = GeminiClient(BuildConfig.GEMINI_API_KEY)
+        gemini = GeminiClient(apiKeyProvider = { SettingsManager(this).getGeminiApiKey() })
         networkStatus = NetworkStatusManager(this)
-        weatherClient = WeatherClient(BuildConfig.OPENWEATHER_API_KEY)
+        weatherClient = WeatherClient(SettingsManager(this).getOpenWeatherApiKey())
         locationHelper = LocationHelper(this)
         pcBridge = PcBridgeServer(this) { speech -> processSpeech(speech) }
         voiceAuth = com.jarvis.assistant.voice.VoiceAuthManager(this)
+        clapDetector = com.jarvis.assistant.voice.ClapDetector()
+        try { clapDetector.stop() } catch (_: Exception) {}
         porcupine = com.jarvis.assistant.voice.PorcupineWakeWord(this)
         offlineBrain = OfflineBrain(this, executor) { turnOn ->
             if (turnOn) pcBridge.start() else pcBridge.stop()
@@ -124,13 +130,68 @@ class AssistantForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.w("JarvisService", "Microphone permission missing; refusing microphone foreground service start")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
-        // Siri-style: on-device KWS only (not continuous Google STT).
-        try { stt.stopContinuous() } catch (_: Exception) {}
-        startWakeWordListening()
+        when (intent?.action) {
+            ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC -> {
+                externalMicSessionActive = true
+                wakeStartGeneration++
+                listenCycleRunning = false
+                releaseAllMics()
+                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+                android.util.Log.i("JarvisService", "Wake microphone paused for an external capture session")
+                return START_STICKY
+            }
+            ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC -> {
+                externalMicSessionActive = false
+                wakeStartGeneration++
+                wakeResumeRetryAttempt = 0
+                wakeResumeRetryPosted = false
+                android.util.Log.i("JarvisService", "Wake microphone resume requested after external capture session")
+                // AudioRecord release can lag behind the enrollment Activity/TTS teardown.
+                mainHandler.postDelayed({ startWakeWordListening() }, 700L)
+                return START_STICKY
+            }
+        }
+        if (intent?.action == ACTION_EXECUTE_DEFERRED_COMMAND) {
+            releaseAllMics()
+            val action = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION).orEmpty()
+            val target = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET)
+            val message = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE)
+            val commandJson = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON)
+            scope.launch {
+                val command = commandJson?.let { raw ->
+                    try { commandFromJson(org.json.JSONObject(raw)) } catch (_: Exception) { null }
+                } ?: com.jarvis.assistant.model.AssistantCommand(action, target, message)
+                val result = try {
+                    executeAssistantCommand(command, confirmed = true)
+                } catch (e: Exception) {
+                    android.util.Log.e("JarvisService", "Deferred action failed", e)
+                    "The action failed after permission was granted: ${e.message ?: "unknown error"}."
+                }
+                listener?.onStateChanged(BrainState.SPEAKING)
+                listener?.onResponse(result, false)
+                tts.speak(result)
+                resumeWakeSoon(2500L)
+            }
+            return START_STICKY
+        }
+        // Match the original manual-Listen ownership flow:
+        // a manual Listen action takes the mic directly; standby starts background wake.
         val action = intent?.action
+        try { stt.stopContinuous() } catch (_: Exception) {}
         if (action == com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING) {
             startListeningCycle()
+        } else {
+            startWakeWordListening()
         }
         return START_STICKY
     }
@@ -145,6 +206,10 @@ class AssistantForegroundService : Service() {
     }
 
     private fun startWakeWordListening() {
+        if (externalMicSessionActive) {
+            android.util.Log.i("JarvisService", "Wake start blocked: external microphone session active")
+            return
+        }
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             android.util.Log.i("JarvisService", "Wake off in settings")
@@ -162,6 +227,7 @@ class AssistantForegroundService : Service() {
     }
 
     private fun startSttWakeFallback() {
+        if (externalMicSessionActive) return
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen()) {
             android.util.Log.i("JarvisService", "Background listen off — STT wake idle")
@@ -172,6 +238,7 @@ class AssistantForegroundService : Service() {
         try {
             stt.listenContinuous { trailing ->
                 mainHandler.post {
+                    if (externalMicSessionActive) return@post
                     try { stt.stopContinuous() } catch (_: Exception) {}
                     try { porcupine.stop() } catch (_: Exception) {}
                     try { openWake?.stop() } catch (_: Exception) {}
@@ -181,18 +248,40 @@ class AssistantForegroundService : Service() {
                         startListeningCycle()
                     }
                     mainHandler.postDelayed({
-                        if (com.jarvis.assistant.util.SettingsManager(this).getBackgroundListen()) {
+                        if (!externalMicSessionActive && !listenCycleRunning && com.jarvis.assistant.util.SettingsManager(this).getBackgroundListen()) {
                             startWakeWordListening()
                         }
                     }, 5_000L)
                 }
             }
+            // Keep the HUD green while the original continuous SpeechRecognizer owns the mic.
+            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
+            listener?.onStateChanged(BrainState.LISTENING)
         } catch (e: Exception) {
+            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+            listener?.onStateChanged(BrainState.IDLE)
             android.util.Log.e("JarvisService", "STT wake failed: ${e.message}")
         }
     }
 
 
+    private fun scheduleWakeResumeRetry() {
+        if (externalMicSessionActive || wakeResumeRetryPosted) return
+        val sm = com.jarvis.assistant.util.SettingsManager(this)
+        if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) return
+
+        // Keep recovering after repeated transient AudioRecord failures. Back off
+        // to 30s instead of permanently disabling wake listening after three tries.
+        wakeResumeRetryPosted = true
+        wakeResumeRetryAttempt += 1
+        val exponent = (wakeResumeRetryAttempt - 1).coerceAtMost(5)
+        val delayMs = (1_000L shl exponent).coerceAtMost(30_000L)
+        android.util.Log.w("JarvisService", "Wake restart retry #$wakeResumeRetryAttempt in ${delayMs}ms")
+        mainHandler.postDelayed({
+            wakeResumeRetryPosted = false
+            if (!externalMicSessionActive && !listenCycleRunning) startWakeWordListening()
+        }, delayMs)
+    }
 
 
 
@@ -202,7 +291,7 @@ class AssistantForegroundService : Service() {
     fun submitText(text: String) {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
-        handleUserSpeech(trimmed)
+        handleUserSpeech(trimmed, requireVoiceAuth = false)
     }
 
 
@@ -210,6 +299,7 @@ class AssistantForegroundService : Service() {
         try { stt.stopContinuous() } catch (_: Exception) {}
         try { openWake?.stop() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
+        
         listenCycleRunning = false
         try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
     }
@@ -217,7 +307,7 @@ class AssistantForegroundService : Service() {
     private fun resumeWakeSoon(delayMs: Long = 1800L) {
         mainHandler.postDelayed({
             try {
-                // Critical: Google STT must be fully stopped before OpenWakeWord takes AudioRecord
+                // Critical: Google STT must be fully stopped before the wake detector reacquires AudioRecord
                 forceReleaseCommandMic()
                 // Small gap so AudioRecord is free
                 mainHandler.postDelayed({
@@ -238,15 +328,14 @@ class AssistantForegroundService : Service() {
 
 
 
-    /**
-     * Siri-style: after answering, keep a short follow-up window so the user can
-     * speak the next command without saying "Hey Jarvis" again.
-     */
     private fun startFollowUpListen() {
+        if (externalMicSessionActive) return
         mainHandler.postDelayed({
+            if (externalMicSessionActive) return@postDelayed
             if (listenCycleRunning) return@postDelayed
             try { openWake?.stop() } catch (_: Exception) {}
-            try { porcupine.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
+            
             try { stt.stopContinuous() } catch (_: Exception) {}
             listenCycleRunning = true
             lastListenCycleMs = System.currentTimeMillis()
@@ -288,18 +377,36 @@ class AssistantForegroundService : Service() {
     }
 
     fun startListeningCycle() {
+        if (externalMicSessionActive) {
+            android.util.Log.i("JarvisService", "Listening cycle blocked: external microphone session active")
+            return
+        }
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.w("JarvisService", "Listening cycle blocked: microphone permission missing")
+            listenCycleRunning = false
+            listener?.onStateChanged(BrainState.ERROR)
+            return
+        }
         val now = System.currentTimeMillis()
         // Allow re-tap after 1.5s (old 8s gate blocked reactor retries)
         if (listenCycleRunning && now - lastListenCycleMs < 1500L) {
             android.util.Log.d("JarvisService", "listen cycle busy")
             return
         }
+        wakeStartGeneration++ // cancel any delayed standby start before taking command mic
         lastListenCycleMs = now
         listenCycleRunning = true
 
+        // A manual tap interrupts any current TTS reply and takes control immediately.
+        try { tts.stop() } catch (_: Exception) {}
         // Hold wake engines OFF for entire command window
         try { openWake?.stop() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
+        
         try { stt.stopContinuous() } catch (_: Exception) {}
         // Note: do not removeCallbacksAndMessages(null) — that kills proactive timers.
 
@@ -310,20 +417,11 @@ class AssistantForegroundService : Service() {
             android.widget.Toast.makeText(this, "Listening…", android.widget.Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
 
-        // Siri-style ack — then wait for TTS before STT (long listen window still applies)
-        val ack = try {
-            val sm = SettingsManager(this)
-            val name = sm.getUserName().trim().lowercase()
-            when {
-                name in listOf("ma'am", "madam", "mam", "miss", "mrs", "ms") -> "Yes ma'am"
-                name.endsWith("a") || name in listOf("priya", "neha", "anjali", "riya", "shreya", "kavya") -> "Yes ma'am"
-                else -> "Yes sir"
-            }
-        } catch (_: Exception) {
-            "Yes sir"
-        }
+        // Personal wake acknowledgement — always address the user as Sagar.
+        val ack = "Ji Sagar"
         try { openWake?.stop() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
+        
         try { tts.speak(ack) } catch (_: Exception) {}
 
         // Safety timeout (longer session)
@@ -342,13 +440,16 @@ class AssistantForegroundService : Service() {
         fun beginStt(retry: Boolean = false) {
             try {
                 try { openWake?.stop() } catch (_: Exception) {}
-                try { porcupine.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
+                
                 stt.listenOnce(
                     onResult = { speech ->
                         listenCycleRunning = false
                         try { stt.stopContinuous() } catch (_: Exception) {}
                         val s = speech.trim()
-                        val echo = s.equals("yes sir", true) ||
+                        val echo = s.equals("ji sagar", true) ||
+                            s.equals("jee sagar", true) ||
+                            s.equals("yes sir", true) ||
                             s.equals("yes ma'am", true) ||
                             s.equals("yes mam", true) ||
                             s.equals("yes", true) ||
@@ -387,18 +488,34 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // After Yes sir finishes, open long STT window
-        mainHandler.postDelayed({ beginStt(false) }, 1600L)
+        // Wait for the acknowledgement to finish instead of guessing its duration.
+        // This prevents STT from opening over the assistant's own voice and avoids
+        // an unnecessary fixed 1.6-second delay when the acknowledgement is short.
+        val ackWaitStartedAt = android.os.SystemClock.elapsedRealtime()
+        fun waitForAckToFinish() {
+            if (!listenCycleRunning) return
+            val waitedMs = android.os.SystemClock.elapsedRealtime() - ackWaitStartedAt
+            if (!tts.isSpeaking()) {
+                beginStt(false)
+            } else if (waitedMs >= 5000L) {
+                android.util.Log.w("JarvisService", "Wake acknowledgement exceeded 5s; stopping TTS before command capture")
+                tts.stop()
+                beginStt(false)
+            } else {
+                mainHandler.postDelayed({ waitForAckToFinish() }, 100L)
+            }
+        }
+        mainHandler.postDelayed({ waitForAckToFinish() }, 100L)
     }
 
 
-    private fun handleUserSpeech(speech: String) {
+    private fun handleUserSpeech(speech: String, requireVoiceAuth: Boolean = true) {
         listener?.onTranscript(speech)
         try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
         listener?.onStateChanged(BrainState.THINKING)
 
         scope.launch {
-            val (resultText, fromCloud) = processSpeech(speech)
+            val (resultText, fromCloud) = processSpeech(speech, requireVoiceAuth)
 
             listener?.onStateChanged(BrainState.SPEAKING)
             listener?.onResponse(resultText, fromCloud)
@@ -412,11 +529,23 @@ class AssistantForegroundService : Service() {
                 resultText
             }
             tts.speak(speechText)
-            listener?.onStateChanged(BrainState.IDLE)
-            // Siri-level: after speaking, one follow-up listen (no second Hey Jarvis), then wake
-            mainHandler.postDelayed({
-                if (!listenCycleRunning) startFollowUpListen()
-            }, 2500L)
+            // Wait for the selected voice (cloud or Android) to finish before
+            // reopening the microphone. This prevents TTS echo and clipped replies.
+            val speechFinished = withTimeoutOrNull(45_000L) {
+                while (tts.isSpeaking()) delay(100L)
+                true
+            } ?: false
+            if (!speechFinished) {
+                android.util.Log.w("JarvisService", "TTS completion timed out; stopping playback before listening")
+                tts.stop()
+            }
+            // Return directly to the always-on wake detector after TTS.
+            // Do not open a one-shot SpeechRecognizer here: it owns AudioRecord and
+            // prevents OpenWakeWord from hearing the wake phrase while it is pending.
+            if (!externalMicSessionActive) {
+                android.util.Log.i("JarvisService", "Reply complete; returning directly to OpenWakeWord standby")
+                resumeWakeSoon(500L)
+            }
         }
     }
 
@@ -529,53 +658,143 @@ class AssistantForegroundService : Service() {
     }
 
 
-    private suspend fun processSpeech(speech: String): Pair<String, Boolean> {
-
-        // Multi-command: split and run each segment through offline brain + executor path once
-        try {
-            val segments = com.jarvis.assistant.util.CommandChainSplitter.split(speech)
-            if (segments != null && segments.size >= 2 && segments.size <= 5) {
-                val replies = mutableListOf<String>()
-                for ((i, seg) in segments.withIndex()) {
-                    val one = try {
-                        offlineBrain.handle(seg) ?: "Done."
-                    } catch (_: Exception) {
-                        "Step failed."
-                    }
-                    // Skip special tokens
-                    val clean = when (one) {
-                        "REQUEST_BRIEFING" -> try {
-                            com.jarvis.assistant.util.BriefingHelper(this@AssistantForegroundService)
-                                .build(includeWeather = networkStatus.isOnline()).text
-                        } catch (_: Exception) { "Briefing unavailable." }
-                        else -> one
-                    }
-                    replies += clean
-                    if (i < segments.lastIndex) kotlinx.coroutines.delay(650)
-                }
-                val summary = buildString {
-                    append("Executed ${segments.size} steps, sir. ")
-                    replies.forEachIndexed { i, r ->
-                        append("Step ${i + 1}: ")
-                        append(r.trim().trimEnd('.'))
-                        append(". ")
-                    }
-                }
-                return summary.trim() to false
+    private fun executeAssistantCommand(
+        command: com.jarvis.assistant.model.AssistantCommand,
+        confirmed: Boolean = false
+    ): String {
+        if (command.action == "pc_connect") {
+            return when (command.target?.trim()?.lowercase()) {
+                "on", "start", "enable", "connect" -> pcBridge.start()
+                "off", "stop", "disable", "disconnect" -> pcBridge.stop()
+                else -> "Say connect PC or disconnect PC."
             }
-        } catch (_: Exception) { }
-
-        // Voice authentication — checked at most once per service session (not per command),
-        // so it's a one-time gate rather than repeated friction. Once it passes, it stays
-        // passed until the service restarts.
-        if (voiceAuth.isEnabled() && voiceAuth.isEnrolled() && !voiceSessionVerified) {
-            val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample() }
-            val passed = sample != null && voiceAuth.verify(sample)
-            if (!passed) {
-                return "Voice authentication failed, sir. The command was not executed. Please try again." to false
-            }
-            voiceSessionVerified = true
         }
+        // CommandExecutor owns the permission preflight so offline, Groq, Gemini,
+        // and deferred actions all follow the same permission + retry path.
+        return if (confirmed) executor.executeConfirmed(command) else executor.execute(command)
+    }
+
+    private fun commandFromJson(json: org.json.JSONObject): com.jarvis.assistant.model.AssistantCommand {
+        val extra = linkedMapOf<String, String>()
+        json.optJSONObject("extra")?.let { values ->
+            val keys = values.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                extra[key] = values.optString(key)
+            }
+        }
+        val steps = json.optJSONArray("steps")?.let { array ->
+            (0 until array.length()).map { commandFromJson(array.getJSONObject(it)) }
+        }
+        return com.jarvis.assistant.model.AssistantCommand(
+            action = json.optString("action"),
+            target = json.optString("target").takeUnless { it.isBlank() || it == "null" },
+            message = json.optString("message").takeUnless { it.isBlank() || it == "null" },
+            extra = extra,
+            steps = steps
+        )
+    }
+
+    private fun requiredRuntimePermissions(command: com.jarvis.assistant.model.AssistantCommand): List<String> {
+        val permissions = linkedSetOf<String>()
+        fun collect(cmd: com.jarvis.assistant.model.AssistantCommand) {
+            when (com.jarvis.assistant.model.ActionType.fromKey(cmd.action)) {
+                com.jarvis.assistant.model.ActionType.CALL -> {
+                    if (cmd.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                    permissions += android.Manifest.permission.CALL_PHONE
+                }
+                com.jarvis.assistant.model.ActionType.SEND_SMS -> {
+                    permissions += android.Manifest.permission.SEND_SMS
+                    if (cmd.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                com.jarvis.assistant.model.ActionType.WHATSAPP_CALL,
+                com.jarvis.assistant.model.ActionType.WHATSAPP_MESSAGE,
+                com.jarvis.assistant.model.ActionType.TELEGRAM_MESSAGE -> {
+                    if (cmd.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                com.jarvis.assistant.model.ActionType.MULTI_STEP -> cmd.steps.orEmpty().forEach(::collect)
+                else -> Unit
+            }
+        }
+        collect(command)
+        return permissions.toList()
+    }
+
+    /**
+     * Voice lock verifies phrase and speaker from the exact same PCM capture.
+     * This prevents mixing a spoken challenge from one person with a replayed
+     * enrolled-speaker sample from another. It is not a full anti-spoof/liveness proof.
+     */
+    private suspend fun authenticateVoiceForCommand(): Boolean {
+        if (!voiceAuth.isEnabled()) return true
+        if (!voiceAuth.isEnrolled()) return false
+
+        val phrase = com.jarvis.assistant.voice.VoiceChallenge.create()
+        withContext(Dispatchers.Main) {
+            tts.speak("Voice security check. Say these four words: $phrase")
+        }
+        val promptFinished = withTimeoutOrNull(20_000L) {
+            while (tts.isSpeaking()) delay(100L)
+            true
+        } ?: false
+        if (!promptFinished) {
+            android.util.Log.w("JarvisService", "Voice challenge prompt did not finish; refusing to capture during playback")
+            tts.stop()
+            return false
+        }
+
+        // One microphone recording feeds both the offline ASR and CAM++ speaker model.
+        val sample = withContext(Dispatchers.IO) {
+            voiceAuth.captureSample(6500)
+        } ?: return false
+
+        val transcript = withContext(Dispatchers.Default) {
+            com.jarvis.assistant.voice.VoiceChallengeRecognizer(applicationContext)
+                .recognize(sample)
+        } ?: return false
+
+        if (!com.jarvis.assistant.voice.VoiceChallenge.matches(phrase, transcript)) return false
+        return voiceAuth.verify(sample)
+    }
+
+    private suspend fun processSpeech(speech: String, requireVoiceAuth: Boolean = true): Pair<String, Boolean> {
+
+        // Authenticate before confirmation, cancellation, routing, or any action execution.
+        if (requireVoiceAuth && !authenticateVoiceForCommand()) {
+            return "Voice verification failed. No command was executed. Please try again." to false
+        }
+
+        // Handle explicit confirmation before OfflineBrain or any cloud model can consume it.
+        if (RiskConfirmGate.hasPending()) {
+            when {
+                RiskConfirmGate.isCancelSpeech(speech) -> {
+                    RiskConfirmGate.cancel()
+                    return "Cancelled. No action was executed." to false
+                }
+                RiskConfirmGate.isConfirmSpeech(speech) -> {
+                    val pending = RiskConfirmGate.takeIfConfirm(speech)
+                    if (pending != null) {
+                        return try {
+                            executeAssistantCommand(pending, confirmed = true) to false
+                        } catch (e: Exception) {
+                            "The confirmed action failed: ${e.message ?: "unknown error"}" to false
+                        }
+                    }
+                    RiskConfirmGate.cancel()
+                    return "The confirmation expired. Please repeat the command." to false
+                }
+                else -> RiskConfirmGate.cancel() // New request cancels the previous pending action.
+            }
+        }
+
+        // Complex/multi-step requests continue through the same OfflineBrain -> Groq -> Gemini
+        // structured-command pipeline. Do not split into "Done" placeholders here.
 
         weatherReplyIfAsked(speech)?.let {
             offlineBrain.recordInteraction()
@@ -607,29 +826,34 @@ class AssistantForegroundService : Service() {
         } else if (offlineReply != null) {
             offlineReply to false
         } else if (networkStatus.isOnline()) {
-            val groq = try {
-                JarvisLlmClient(apiKeyProvider = { BuildConfig.GROQ_API_KEY }).chat(
-                    speech,
-                    history = emptyList(),
-                    memoryContext = buildJarvisContext(speech)
-                )
+            val groqClient = JarvisLlmClient(
+                apiKeyProvider = {
+                    SettingsManager(this).getGroqApiKey()
+                }
+            )
+            val groqCommand = try {
+                groqClient.getCommand(speech, buildJarvisContext(speech))
             } catch (e: Exception) {
+                android.util.Log.e("JarvisService", "Groq command planning failed", e)
                 null
             }
-            if (groq != null && groq.ok && groq.text.isNotBlank()) {
-                groq.text to true
+            if (groqCommand != null) {
+                try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
+                try {
+                    executeAssistantCommand(groqCommand) to true
+                } catch (e: Exception) {
+                    android.util.Log.e("JarvisService", "Groq action execution failed", e)
+                    "The requested action could not be executed: ${e.message ?: "unknown error"}" to true
+                }
             } else {
                 try {
+                    // Gemini is the structured-command fallback, using the same executor.
                     val command = gemini.getCommand(speech)
                     try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
-                executor.execute(command) to true
+                    executeAssistantCommand(command) to true
                 } catch (e: Exception) {
-                    val hint = groq?.error.orEmpty()
-                    if (hint.contains("API key", ignoreCase = true)) {
-                        "Cloud intelligence is not configured, sir. On-device commands remain fully operational." to true
-                    } else {
-                        "I was unable to reach external systems, sir. Please try an on-device command." to true
-                    }
+                    android.util.Log.e("JarvisService", "Both cloud command planners failed", e)
+                    "I couldn't interpret or execute that request. Please try a clearer command." to true
                 }
             }
         } else {
@@ -671,7 +895,7 @@ class AssistantForegroundService : Service() {
         }
 
         val result = try {
-            JarvisLlmClient(apiKeyProvider = { BuildConfig.GROQ_API_KEY }).chat(combined)
+            JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey() }).chat(combined)
         } catch (e: Exception) {
             null
         }
@@ -776,12 +1000,16 @@ class AssistantForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        try { openWake?.stop() } catch (_: Exception) {}
+        // Prevent late IO/start callbacks or command coroutines from reviving work
+        // after Android has destroyed this foreground service.
+        scope.cancel()
         try { callAnnouncer?.stop() } catch (_: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
         proactive?.stop()
         proactive = null
-        if (::porcupine.isInitialized) porcupine.stop()
+        try { openWake?.stop() } catch (_: Exception) {}
+        try { porcupine.stop() } catch (_: Exception) {}
+        try { clapDetector.stop() } catch (_: Exception) {}
         stt.stopContinuous()
         stt.destroy()
         tts.shutdown()

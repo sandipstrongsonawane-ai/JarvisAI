@@ -7,7 +7,12 @@ import android.content.Context
  */
 class SettingsManager(context: Context) {
 
+    companion object {
+        const val DEFAULT_ELEVENLABS_VOICE_ID = "RABOvaPec1ymXz02oDQi"
+    }
+
     private val prefs = context.getSharedPreferences("jarvis_settings", Context.MODE_PRIVATE)
+    private val secureApiKeys = SecureApiKeyStore(context)
 
     // Voice
     fun getVoiceSpeed(): Float = prefs.getFloat("voice_speed", 1.0f)
@@ -16,11 +21,13 @@ class SettingsManager(context: Context) {
     fun getVoicePitch(): Float = prefs.getFloat("voice_pitch", 1.0f)
     fun setVoicePitch(pitch: Float) = prefs.edit().putFloat("voice_pitch", pitch).apply()
 
-    fun getVoiceType(): String = prefs.getString("voice_type", "male") ?: "male"
+    fun getVoiceType(): String = prefs.getString("voice_type", "female") ?: "female"
     fun setVoiceType(type: String) = prefs.edit().putString("voice_type", type).apply()
 
-    /** Prefer ElevenLabs human voice when online + API key set (default on). */
-    fun getPreferCloudVoice(): Boolean = prefs.getBoolean("prefer_cloud_voice", false)
+    /** Prefer ElevenLabs human voice when an encrypted runtime key is available. */
+    fun getPreferCloudVoice(): Boolean =
+        prefs.getBoolean("prefer_cloud_voice", getElevenLabsApiKey().isNotBlank())
+
     fun setPreferCloudVoice(enabled: Boolean) =
         prefs.edit().putBoolean("prefer_cloud_voice", enabled).apply()
 
@@ -58,7 +65,33 @@ class SettingsManager(context: Context) {
     fun getUseShortAnswers(): Boolean = prefs.getBoolean("short_answers", false)
     fun setUseShortAnswers(use: Boolean) = prefs.edit().putBoolean("short_answers", use).apply()
 
-    fun clear() = prefs.edit().clear().apply()
+    fun getGroqApiKey(): String = secureApiKeys.get("groq") ?: ""
+    fun setGroqApiKey(value: String) = secureApiKeys.put("groq", value)
+    fun getGeminiApiKey(): String = secureApiKeys.get("gemini") ?: ""
+    fun setGeminiApiKey(value: String) = secureApiKeys.put("gemini", value)
+
+    fun getElevenLabsApiKey(): String = secureApiKeys.get("elevenlabs") ?: ""
+    fun setElevenLabsApiKey(value: String) {
+        secureApiKeys.put("elevenlabs", value)
+        if (value.isNotBlank()) setPreferCloudVoice(true)
+    }
+
+    fun getElevenLabsVoiceId(): String =
+        secureApiKeys.get("elevenlabs_voice_id")
+            ?.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{8,64}$")) }
+            ?: DEFAULT_ELEVENLABS_VOICE_ID
+
+    fun setElevenLabsVoiceId(value: String) {
+        val normalized = value.trim()
+        if (normalized.matches(Regex("^[A-Za-z0-9_-]{8,64}$"))) {
+            secureApiKeys.put("elevenlabs_voice_id", normalized)
+        }
+    }
+
+    fun getOpenWeatherApiKey(): String = secureApiKeys.get("openweather") ?: ""
+    fun setOpenWeatherApiKey(value: String) = secureApiKeys.put("openweather", value)
+
+    fun clear() { prefs.edit().clear().apply(); secureApiKeys.clear() }
 
     fun getFirstLaunchTime(): Long {
         val t = prefs.getLong("first_launch_time", 0L)
@@ -74,13 +107,13 @@ class SettingsManager(context: Context) {
 
     // Background wake-word listening (must stay INSIDE the class)
     
-    /** On-device / wake-word master switch (OpenWakeWord / Porcupine). */
+    /** On-device wake-word master switch (Voicute only). */
     fun getWakeWordEnabled(): Boolean = prefs.getBoolean("wake_word", true)
     fun setWakeWordEnabled(v: Boolean) = prefs.edit().putBoolean("wake_word", v).apply()
 
     fun getBackgroundListen(): Boolean = prefs.getBoolean("background_listen", true)
     
-    /** Google STT continuous "hey jarvis" — higher battery; off by default. */
+    /** Legacy preference retained for migration; continuous Google STT wake is disabled. */
     fun getSttContinuousWake(): Boolean = prefs.getBoolean("stt_continuous_wake", true)
     fun setSttContinuousWake(enabled: Boolean) =
         prefs.edit().putBoolean("stt_continuous_wake", enabled).apply()

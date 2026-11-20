@@ -24,7 +24,7 @@ object RiskConfirmGate {
         return l in setOf(
             "yes", "yeah", "yep", "confirm", "do it", "proceed", "go ahead",
             "ha", "haan", "han", "kar do", "karo", "ok", "okay"
-        ) || l.startsWith("yes ") || l.startsWith("confirm")
+        )
     }
 
     fun isCancelSpeech(speech: String): Boolean {
@@ -42,13 +42,19 @@ object RiskConfirmGate {
             return false
         }
         return when (type) {
-            // Hands-free: voice call executes immediately (user already spoke the command)
-            ActionType.CALL -> false
-            ActionType.MULTI_STEP -> true
-            ActionType.UNLOCK_APP -> true
+            // Phone calls are irreversible external actions; require a spoken confirmation.
+            ActionType.CALL,
+            ActionType.UNLOCK_APP,
+            ActionType.UNINSTALL_APP,
+            ActionType.SEND_SMS,
+            ActionType.WHATSAPP_MESSAGE,
+            ActionType.TELEGRAM_MESSAGE,
+            ActionType.SET_PIN,
+            ActionType.UNLOCK_PHONE -> true
+            ActionType.MULTI_STEP -> cmd.steps.orEmpty().any { isRisky(it) }
             else -> {
                 val a = cmd.action.lowercase()
-                a.contains("delete") || a.contains("wipe") || a == "multi_step"
+                a.contains("delete") || a.contains("wipe")
             }
         }
     }
@@ -62,10 +68,38 @@ object RiskConfirmGate {
         return when (type) {
             ActionType.CALL ->
                 "Call ${cmd.target ?: "this number"}? Say confirm or cancel."
-            ActionType.MULTI_STEP ->
-                "Run a multi-step sequence? Say confirm or cancel."
+            ActionType.MULTI_STEP -> {
+                val details = cmd.steps.orEmpty().take(5).mapIndexed { index, step ->
+                    val stepType = ActionType.fromKey(step.action)
+                    val description = when (stepType) {
+                        ActionType.WHATSAPP_MESSAGE ->
+                            "WhatsApp message to ${step.target ?: "unknown recipient"}: ${step.message.orEmpty().take(80)}"
+                        ActionType.TELEGRAM_MESSAGE ->
+                            "Telegram message to ${step.target ?: "unknown recipient"}: ${step.message.orEmpty().take(80)}"
+                        ActionType.SEND_SMS ->
+                            "SMS to ${step.target ?: "unknown recipient"}: ${step.message.orEmpty().take(80)}"
+                        ActionType.CALL ->
+                            "call ${step.target ?: "unknown contact"}"
+                        ActionType.OPEN_APP ->
+                            "open ${step.target ?: "app"}"
+                        ActionType.UNINSTALL_APP ->
+                            "uninstall ${step.target ?: "app"}"
+                        else -> listOf(step.action, step.target, step.message?.take(60))
+                            .filterNot { it.isNullOrBlank() }.joinToString(" ")
+                    }
+                    "${index + 1}. $description"
+                }.joinToString("; ")
+                if (details.isBlank()) "Run this multi-step sequence? Say confirm or cancel."
+                else "Run these steps: $details. Say confirm or cancel."
+            }
             ActionType.UNLOCK_APP ->
                 "Unlock ${cmd.target ?: "the app"}? Say confirm or cancel."
+            ActionType.SEND_SMS, ActionType.WHATSAPP_MESSAGE, ActionType.TELEGRAM_MESSAGE ->
+                "Send the message to ${cmd.target ?: "this recipient"}? Say confirm or cancel."
+            ActionType.UNINSTALL_APP ->
+                "Uninstall ${cmd.target ?: "this app"}? Say confirm or cancel."
+            ActionType.SET_PIN ->
+                "Set or change the device app PIN? Say confirm or cancel."
             else ->
                 "Proceed with ${cmd.action}? Say confirm or cancel."
         }

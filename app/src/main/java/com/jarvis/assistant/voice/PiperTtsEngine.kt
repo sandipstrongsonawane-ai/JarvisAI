@@ -9,17 +9,15 @@ import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * On-device Piper TTS — no Google, no ElevenLabs.
+ * On-device Piper TTS. The current bundled model contract is English-only.
+ * Hindi and Marathi replies are routed to Android's matching locale voice.
  *
- * Expected assets (copy into app/src/main/assets/piper/):
+ * Expected optional assets in app/src/main/assets/piper/:
  *   - en_GB-northern_english_male-medium.onnx
  *   - en_GB-northern_english_male-medium.onnx.json
- *   - espeak-ng-data/   (folder, from Piper release)
+ *   - espeak-ng-data/
  *
- * Native library (optional, recommended):
- *   jniLibs/arm64-v8a/libpiper_jni.so  (build from rhasspy/piper or use a prebuilt)
- *
- * Until the .so + voice pack are present, [isReady] is false and [speak] returns false.
+ * Native library: jniLibs/arm64-v8a/libpiper_jni.so
  */
 class PiperTtsEngine(private val context: Context) {
 
@@ -44,18 +42,28 @@ class PiperTtsEngine(private val context: Context) {
                 Log.i(TAG, "libpiper_jni loaded")
             } catch (e: UnsatisfiedLinkError) {
                 nativeLoaded = false
-                Log.w(TAG, "libpiper_jni not found — add jniLibs + voice pack. ${e.message}")
+                Log.w(TAG, "libpiper_jni not found: ${e.message}")
             }
             val onnx = File(modelDir, MODEL_ONNX)
             val json = File(modelDir, MODEL_JSON)
-            isReady = nativeLoaded && onnx.exists() && json.exists()
+            val assetsReady = onnx.exists() && onnx.length() > 0L &&
+                json.exists() && json.length() > 0L
+            isReady = if (nativeLoaded && assetsReady) {
+                try {
+                    nativeInit(onnx.absolutePath, json.absolutePath, modelDir.absolutePath)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Piper native init failed: ${e.message}", e)
+                    false
+                }
+            } else {
+                false
+            }
             if (isReady) {
-                nativeInit(onnx.absolutePath, json.absolutePath, modelDir.absolutePath)
                 Log.i(TAG, "Piper ready at ${modelDir.absolutePath}")
             } else {
                 Log.w(
                     TAG,
-                    "Piper not ready. onnx=${onnx.exists()} json=${json.exists()} native=$nativeLoaded"
+                    "Piper unavailable. onnx=${onnx.exists()} json=${json.exists()} native=$nativeLoaded"
                 )
             }
         } catch (e: Exception) {
@@ -64,10 +72,7 @@ class PiperTtsEngine(private val context: Context) {
         }
     }
 
-    /**
-     * Synthesize [text] and play. Returns true if playback started.
-     * Safe to call off main thread; playback is local.
-     */
+    /** Synthesize [text] and play. Returns true if playback started. */
     fun speak(text: String): Boolean {
         if (!isReady) return false
         val cleaned = text
@@ -170,7 +175,6 @@ class PiperTtsEngine(private val context: Context) {
                 }
             }
         }
-        // espeak-ng-data directory copy (shallow + one level)
         extractDirAsset("$prefix/espeak-ng-data", File(modelDir, "espeak-ng-data"))
     }
 
@@ -205,7 +209,6 @@ class PiperTtsEngine(private val context: Context) {
         }
     }
 
-    /** JNI — implemented in libpiper_jni.so */
     private external fun nativeInit(modelPath: String, configPath: String, dataDir: String): Boolean
     private external fun nativeSynthesize(text: String, wavOutPath: String): Boolean
     private external fun nativeStop()

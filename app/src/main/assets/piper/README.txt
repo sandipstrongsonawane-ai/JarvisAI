@@ -1,27 +1,23 @@
-JARVIS Piper voice pack (no Google / no ElevenLabs)
-====================================================
+JARVIS optional Piper voice engine
+==================================
 
-1) Download a male English Piper voice, e.g. from:
-   https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_GB/northern_english_male/medium
+Piper is optional and currently configured for English only.
 
-   Files needed in this folder (assets/piper/):
-   - en_GB-northern_english_male-medium.onnx
-   - en_GB-northern_english_male-medium.onnx.json
+Expected files in this folder:
+- en_GB-northern_english_male-medium.onnx
+- en_GB-northern_english_male-medium.onnx.json
+- espeak-ng-data/ (from the matching Piper release)
 
-2) espeak-ng-data:
-   From Piper releases, copy the espeak-ng-data directory into:
-   assets/piper/espeak-ng-data/
+Native library:
+- app/src/main/jniLibs/arm64-v8a/libpiper_jni.so
 
-3) Native library:
-   Build or obtain libpiper_jni.so for arm64-v8a (and armeabi-v7a if needed):
-   app/src/main/jniLibs/arm64-v8a/libpiper_jni.so
+The app verifies that the ONNX model, JSON config, native library, and native
+initialization are all successful before marking Piper ready.
 
-   JNI exports expected by PiperTtsEngine:
-   - Java_com_jarvis_assistant_voice_PiperTtsEngine_nativeInit
-   - Java_com_jarvis_assistant_voice_PiperTtsEngine_nativeSynthesize
-   - Java_com_jarvis_assistant_voice_PiperTtsEngine_nativeStop
-   - Java_com_jarvis_assistant_voice_PiperTtsEngine_nativeRelease
+Hindi and Marathi replies are routed to Android system TTS using the detected
+reply language (including common Roman Marathi/Hinglish markers). The English
+Piper model is never used to pronounce Hindi or Marathi text. If Piper is absent
+or fails, Android system TTS remains the fallback.
 
-4) Rebuild the APK. Logcat tag "PiperTTS" should say: Piper ready.
-
-Without these files, Jarvis will not speak (by design — no Google/ElevenLabs fallback).
+No voice model is downloaded at runtime. To enable Piper, place the matching
+licensed model files and espeak-ng-data in this directory before building.

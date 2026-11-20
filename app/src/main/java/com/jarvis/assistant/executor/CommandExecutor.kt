@@ -24,20 +24,68 @@ class CommandExecutor(private val context: Context) {
     private val lockManager = AppLockManager(context)
 
     fun execute(cmd: AssistantCommand): String {
-        // Stark L6 — confirm gate
-        try {
-            val held = com.jarvis.assistant.executor.RiskConfirmGate.takeIfConfirm(
-                listOfNotNull(cmd.message, cmd.target, cmd.action).joinToString(" ")
-            )
-            // actual confirm speech is handled in service; here gate risky new commands
-        } catch (_: Exception) {}
-        if (!riskBypass && com.jarvis.assistant.executor.RiskConfirmGate.isRisky(cmd)) {
+        // Confirmation is resolved centrally by AssistantForegroundService before execution.
+        if (!riskBypass.get() && com.jarvis.assistant.executor.RiskConfirmGate.isRisky(cmd)) {
             try { com.jarvis.assistant.ui.HudController.thinking() } catch (_: Exception) {}
             return com.jarvis.assistant.executor.RiskConfirmGate.hold(cmd)
         }
 
-        return when (ActionType.fromKey(cmd.action)) {
+        val missingSpecialAccess = requiredSpecialAccess(cmd).firstOrNull {
+            !isSpecialAccessEnabled(it)
+        }
+        if (missingSpecialAccess != null) {
+            return try {
+                val request = Intent(context, com.jarvis.assistant.RuntimePermissionActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, cmd.action)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, cmd.target)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, cmd.message)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON, commandToJson(cmd).toString())
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_SPECIAL_ACCESS, missingSpecialAccess)
+                }
+                launchPermissionRequest(request, cmd, listOf(missingSpecialAccess))
+                when (missingSpecialAccess) {
+                    "accessibility" -> "Jarvis needs Accessibility access. Enable Jarvis in the settings page; I'll retry the action when you return."
+                    else -> "Jarvis needs notification access. Enable it in settings; I'll retry the action when you return."
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisCommandExecutor", "Could not open special-access settings", e)
+                "Required system access is off. Open Jarvis settings and enable it before retrying."
+            }
+        }
+
+        val missingPermissions = requiredRuntimePermissions(cmd).filter {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isNotEmpty()) {
+            return try {
+                val request = Intent(context, com.jarvis.assistant.RuntimePermissionActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, cmd.action)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, cmd.target)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, cmd.message)
+                    putExtra(
+                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON,
+                        commandToJson(cmd).toString()
+                    )
+                    putStringArrayListExtra(
+                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_PERMISSIONS,
+                        ArrayList(missingPermissions)
+                    )
+                }
+                launchPermissionRequest(request, cmd, missingPermissions)
+                "Jarvis needs permission to complete this action. Please grant it from the permission prompt/notification; I'll retry automatically."
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisCommandExecutor", "Could not open permission request", e)
+                "Permission is required. Open Jarvis and retry this action."
+            }
+        }
+
+        return try {
+            when (ActionType.fromKey(cmd.action)) {
             ActionType.OPEN_APP -> openApp(cmd.target)
+            ActionType.NAVIGATE -> navigate(cmd.target, cmd.message)
             ActionType.CLOSE_APP -> closeApp(cmd.target)
             ActionType.CLEAR_RECENTS -> clearRecents()
             ActionType.UNINSTALL_APP -> uninstallApp(cmd.target)
@@ -110,9 +158,164 @@ class CommandExecutor(private val context: Context) {
             ActionType.REPLY -> cmd.message ?: ""
             ActionType.PC_CONNECT -> "PC connect is handled by the assistant service, not here."
             ActionType.UNKNOWN -> "I didn't understand that command."
+            }
+        } catch (e: SecurityException) {
+            "Permission required for this action. No action was completed."
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisCommandExecutor", "Action ${cmd.action} failed", e)
+            "Action failed: ${e.message ?: "unknown error"}. It was not confirmed as complete."
         }
     }
 
+
+    private fun launchPermissionRequest(
+        request: Intent,
+        command: AssistantCommand,
+        missingPermissions: List<String>
+    ) {
+        val processState = android.app.ActivityManager.RunningAppProcessInfo()
+        android.app.ActivityManager.getMyMemoryState(processState)
+        val appVisible = context is android.app.Activity ||
+            processState.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+            processState.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+
+        if (appVisible) {
+            context.startActivity(request)
+            return
+        }
+
+        // Android restricts background services from opening permission dialogs.
+        // Post a user-tappable notification rather than silently pretending a dialog opened.
+        val channelId = "jarvis_action_permissions"
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    channelId,
+                    "Action permission requests",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                )
+            )
+        }
+        val requestId = 9200 + (command.action + command.target.orEmpty() + command.message.orEmpty()).hashCode().and(0x7fff)
+        val pending = android.app.PendingIntent.getActivity(
+            context,
+            requestId,
+            request,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(com.jarvis.assistant.R.drawable.ic_mic)
+            .setContentTitle("Jarvis needs permission")
+            .setContentText("Tap to grant access and continue: ${missingPermissions.joinToString()}")
+            .setStyle(
+                androidx.core.app.NotificationCompat.BigTextStyle()
+                    .bigText("Tap to grant the required permission(s) and continue your pending Jarvis action.")
+            )
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        manager.notify(requestId, notification)
+    }
+
+    private fun requiredSpecialAccess(command: AssistantCommand): List<String> {
+        val access = linkedSetOf<String>()
+        fun collect(item: AssistantCommand) {
+            when (ActionType.fromKey(item.action)) {
+                ActionType.CLEAR_RECENTS,
+                ActionType.READ_SCREEN,
+                ActionType.SCREENSHOT,
+                ActionType.ANALYZE_SCREEN,
+                ActionType.SCREEN_ACT,
+                ActionType.SHARE_SCREEN,
+                ActionType.SCREEN_SAVE_PHONE,
+                ActionType.SCREEN_EMAIL,
+                ActionType.SCREEN_OPEN_LINK -> access += "accessibility"
+                ActionType.NOTIF_SUMMARY -> access += "notification_listener"
+                ActionType.MULTI_STEP -> item.steps.orEmpty().forEach(::collect)
+                else -> Unit
+            }
+        }
+        collect(command)
+        return access.toList()
+    }
+
+    private fun isSpecialAccessEnabled(kind: String): Boolean {
+        val setting = when (kind) {
+            "accessibility" -> android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            "notification_listener" -> "enabled_notification_listeners"
+            else -> return false
+        }
+        val enabled = android.provider.Settings.Secure.getString(context.contentResolver, setting).orEmpty()
+        val component = when (kind) {
+            "accessibility" -> android.content.ComponentName(
+                context,
+                com.jarvis.assistant.accessibility.JarvisAccessibilityService::class.java
+            )
+            "notification_listener" -> android.content.ComponentName(
+                context,
+                com.jarvis.assistant.notifications.JarvisNotificationListener::class.java
+            )
+            else -> return false
+        }.flattenToString()
+        return enabled.split(':').any { it.equals(component, ignoreCase = true) }
+    }
+
+    private fun requiredRuntimePermissions(command: AssistantCommand): List<String> {
+        val permissions = linkedSetOf<String>()
+        fun collect(item: AssistantCommand) {
+            when (ActionType.fromKey(item.action)) {
+                ActionType.CALL -> {
+                    if (item.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                    permissions += android.Manifest.permission.CALL_PHONE
+                }
+                ActionType.SEND_SMS -> {
+                    permissions += android.Manifest.permission.SEND_SMS
+                    if (item.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                ActionType.WHATSAPP_CALL,
+                ActionType.WHATSAPP_MESSAGE,
+                ActionType.TELEGRAM_MESSAGE -> {
+                    if (item.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                ActionType.SEARCH_SMS -> permissions += android.Manifest.permission.READ_SMS
+                ActionType.SEARCH_PHOTOS -> {
+                    permissions += if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        android.Manifest.permission.READ_MEDIA_IMAGES
+                    } else {
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE
+                    }
+                }
+                ActionType.MULTI_STEP -> item.steps.orEmpty().forEach(::collect)
+                else -> Unit
+            }
+        }
+        collect(command)
+        return permissions.toList()
+    }
+
+    private fun commandToJson(command: AssistantCommand): org.json.JSONObject {
+        val json = org.json.JSONObject()
+            .put("action", command.action)
+            .put("target", command.target)
+            .put("message", command.message)
+        val extra = org.json.JSONObject()
+        command.extra.forEach { (key, value) -> extra.put(key, value) }
+        json.put("extra", extra)
+        command.steps?.let { steps ->
+            val array = org.json.JSONArray()
+            steps.forEach { array.put(commandToJson(it)) }
+            json.put("steps", array)
+        }
+        return json
+    }
 
     private fun appCall(app: String?, kind: String?): String {
         if (app.isNullOrBlank()) return "Which app should I use for the call, sir?"
@@ -149,7 +352,7 @@ class CommandExecutor(private val context: Context) {
 
     private fun whatsappCall(name: String?, video: Boolean): String {
         if (name.isNullOrBlank()) return "Whom should I call on WhatsApp, sir?"
-        val number = lookupContactNumber(name)
+        val number = resolvePhoneNumber(name)
             ?: return "I couldn't find a number for $name, sir."
         val digits = number.filter { it.isDigit() }
         if (digits.length < 8) return "Number for $name looks invalid, sir."
@@ -294,6 +497,40 @@ class CommandExecutor(private val context: Context) {
         }
     }
 
+    /** Opens Google Maps directly into a destination route; no location permission is needed for a typed destination. */
+    private fun navigate(destination: String?, modeHint: String?): String {
+        val place = destination?.trim().orEmpty()
+        if (place.isBlank()) return "Where should I navigate to?"
+        val mode = when (modeHint?.lowercase()?.trim()) {
+            "walk", "walking", "pedestrian" -> "w"
+            "bike", "bicycle", "cycling" -> "b"
+            "transit", "bus", "train" -> "r"
+            else -> "d"
+        }
+        val navigationUri = Uri.parse("google.navigation:q=" + Uri.encode(place) + "&mode=$mode")
+        val mapsIntent = Intent(Intent.ACTION_VIEW, navigationUri).apply {
+            setPackage("com.google.android.apps.maps")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            if (mapsIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(mapsIntent)
+                "Starting Google Maps navigation to $place."
+            } else {
+                val webUri = Uri.parse(
+                    "https://www.google.com/maps/dir/?api=1&destination=" + Uri.encode(place) +
+                        "&travelmode=" + when (mode) { "w" -> "walking"; "b" -> "bicycling"; "r" -> "transit"; else -> "driving" }
+                )
+                val webIntent = Intent(Intent.ACTION_VIEW, webUri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(webIntent)
+                "Opening route directions to $place."
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisCommandExecutor", "Navigation launch failed for $place", e)
+            "Couldn't start navigation to $place: ${e.message ?: "no Maps handler found"}."
+        }
+    }
+
     private fun openApp(appName: String?): String {
         if (appName.isNullOrBlank()) return "Which application should I open, sir?"
         val q = appName.trim().lowercase()
@@ -352,6 +589,27 @@ class CommandExecutor(private val context: Context) {
             }
         }
 
+        // Some OEM builds expose YouTube through a browsable URL but not a launch intent.
+        if (q == "youtube" || q == "yt") {
+            val youtubeUri = Uri.parse("https://www.youtube.com/")
+            val appIntent = Intent(Intent.ACTION_VIEW, youtubeUri).apply {
+                setPackage("com.google.android.youtube")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                if (appIntent.resolveActivity(pm) != null) {
+                    context.startActivity(appIntent)
+                    return "Opening YouTube."
+                }
+                val browserIntent = Intent(Intent.ACTION_VIEW, youtubeUri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(browserIntent)
+                return "Opening YouTube in your browser."
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisCommandExecutor", "YouTube launch failed", e)
+                return "Couldn't open YouTube: ${e.message ?: "no compatible app"}."
+            }
+        }
+
         // Browser fallback if Chrome package missing / restricted
         if (q.contains("chrome") || q.contains("browser")) {
             try {
@@ -398,8 +656,10 @@ class CommandExecutor(private val context: Context) {
     // Requires CALL_PHONE permission granted at runtime.
     private fun callContact(name: String?): String {
         if (name.isNullOrBlank()) return "Whom shall I call, sir?"
-        val number = lookupContactNumber(name) ?: return "I couldn't locate a number for $name, sir."
-        val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")).apply {
+        val number = resolvePhoneNumber(name) ?: return "I couldn't locate a number for $name, sir."
+        val dialable = number.filter { it.isDigit() || it == '+' }
+        if (dialable.count { it.isDigit() } < 8) return "Number for $name looks invalid, sir."
+        val intent = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", dialable, null)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
@@ -409,9 +669,18 @@ class CommandExecutor(private val context: Context) {
     // Requires SEND_SMS permission granted at runtime.
     private fun sendSms(name: String?, message: String?): String {
         if (name.isNullOrBlank() || message.isNullOrBlank()) return "I need both a recipient and a message, sir."
-        val number = lookupContactNumber(name) ?: return "I couldn't locate a number for $name, sir."
-        SmsManager.getDefault().sendTextMessage(number, null, message, null, null)
+        val number = resolvePhoneNumber(name) ?: return "I couldn't locate a number for $name, sir."
+        val smsNumber = number.filter { it.isDigit() || it == '+' }
+        if (smsNumber.count { it.isDigit() } < 8) return "Number for $name looks invalid, sir."
+        SmsManager.getDefault().sendTextMessage(smsNumber, null, message, null, null)
         return "Message sent to $name, sir."
+    }
+
+    private fun resolvePhoneNumber(value: String): String? {
+        val candidate = value.trim()
+        val digits = candidate.filter { it.isDigit() }
+        if (digits.length in 8..15) return candidate
+        return lookupContactNumber(candidate)
     }
 
     private fun lookupContactNumber(name: String): String? {
@@ -424,40 +693,19 @@ class CommandExecutor(private val context: Context) {
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
         )
         return try {
-            val likeHit = resolver.query(
-                uri, projection,
-                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
-                arrayOf("%$q%"),
-                null
-            )?.use { c ->
-                if (c.moveToFirst()) c.getString(0) else null
-            }
-            if (!likeHit.isNullOrBlank()) return likeHit
-
             resolver.query(uri, projection, null, null, null)?.use { c ->
                 val numIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
                 val nameIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
                 if (numIdx < 0 || nameIdx < 0) return@use null
-                val ql = q.lowercase()
-                var exact: String? = null
-                var starts: String? = null
-                var contains: String? = null
-                var tokenHit: String? = null
+                val contacts = mutableListOf<ContactMatchResolver.Contact>()
                 while (c.moveToNext()) {
-                    val display = c.getString(nameIdx)?.trim() ?: continue
-                    val number = c.getString(numIdx) ?: continue
-                    val d = display.lowercase()
-                    when {
-                        d == ql -> { exact = number; break }
-                        starts == null && (d.startsWith(ql) || ql.startsWith(d)) -> starts = number
-                        contains == null && (d.contains(ql) || ql.contains(d)) -> contains = number
-                    }
-                    val tokens = ql.split(Regex("\\s+")).filter { it.length >= 2 }
-                    if (tokenHit == null && tokens.isNotEmpty() && tokens.all { d.contains(it) }) {
-                        tokenHit = number
+                    val display = c.getString(nameIdx)?.trim().orEmpty()
+                    val number = c.getString(numIdx)?.trim().orEmpty()
+                    if (display.isNotBlank() && number.isNotBlank()) {
+                        contacts += ContactMatchResolver.Contact(display, number)
                     }
                 }
-                exact ?: starts ?: tokenHit ?: contains
+                ContactMatchResolver.resolve(q, contacts)
             }
         } catch (_: SecurityException) {
             null
@@ -484,6 +732,8 @@ class CommandExecutor(private val context: Context) {
                 "Opening Bluetooth settings"
             }
             "flashlight" -> toggleFlashlight()
+            "torch_on" -> setFlashlight(true)
+            "torch_off" -> setFlashlight(false)
             "airplane_mode" -> {
                 context.startActivity(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 "Opening airplane mode settings"
@@ -493,12 +743,15 @@ class CommandExecutor(private val context: Context) {
     }
 
     private var torchOn = false
-    private fun toggleFlashlight(): String {
+    private fun toggleFlashlight(): String = setFlashlight(!torchOn)
+
+    private fun setFlashlight(enabled: Boolean): String {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val camId = cameraManager.cameraIdList.firstOrNull() ?: return "No suitable camera module detected, sir."
-        torchOn = !torchOn
-        cameraManager.setTorchMode(camId, torchOn)
-        return if (torchOn) "Flashlight activated, sir." else "Flashlight deactivated, sir."
+        val camId = cameraManager.cameraIdList.firstOrNull()
+            ?: return "No suitable camera module detected, sir."
+        cameraManager.setTorchMode(camId, enabled)
+        torchOn = enabled
+        return if (enabled) "Flashlight activated, sir." else "Flashlight deactivated, sir."
     }
 
     /** Volume control on the music stream (what "volume up/down/mute" means for most users). */
@@ -722,30 +975,25 @@ private fun setAlarm(target: String?): String {
                 return "Spotify doesn't appear to be installed, sir."
             }
             "youtube music" in hint || "yt music" in hint -> {
-                val i = Intent(Intent.ACTION_SEARCH).apply {
+                val searchUri = Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(q))
+                val appSearch = Intent(Intent.ACTION_VIEW, searchUri).apply {
                     setPackage("com.google.android.apps.youtube.music")
-                    putExtra("query", q)
                 }
-                if (tryStart(i)) return "Opening YouTube Music for $q."
-                val v = Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(q))
-                ).apply { setPackage("com.google.android.apps.youtube.music") }
-                if (tryStart(v)) return "Opening YouTube Music for $q."
-                return "YouTube Music doesn't appear to be installed, sir."
+                if (tryStart(appSearch)) return "Opened YouTube Music results for $q. Select a track to play."
+                if (tryStart(Intent(Intent.ACTION_VIEW, searchUri))) {
+                    return "Opened YouTube Music results for $q. Select a track to play."
+                }
+                return "Couldn't open YouTube Music search for $q."
             }
             "youtube" in hint && "music" !in hint -> {
-                val play = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                val searchUri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q))
+                val appSearch = Intent(Intent.ACTION_VIEW, searchUri).apply {
                     setPackage("com.google.android.youtube")
-                    putExtra(SearchManager.QUERY, q)
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio")
                 }
-                if (tryStart(play)) return "Playing $q on YouTube."
-                val search = Intent(Intent.ACTION_SEARCH).apply {
-                    setPackage("com.google.android.youtube")
-                    putExtra("query", q)
-                }
-                if (tryStart(search)) return "Searching YouTube for $q — tap the first result to play."
+                if (tryStart(appSearch)) return "Opened YouTube results for $q. Select a result to start playback."
+                val browserSearch = Intent(Intent.ACTION_VIEW, searchUri)
+                if (tryStart(browserSearch)) return "Opened YouTube results for $q. Select a result to start playback."
+                return "Couldn't open YouTube search for $q."
             }
         }
 
@@ -793,7 +1041,7 @@ private fun setAlarm(target: String?): String {
     private fun whatsappMessage(target: String?, message: String?): String {
         if (target.isNullOrBlank()) return "Send a WhatsApp message to whom?"
         if (message.isNullOrBlank()) return "What should the message say?"
-        val rawNumber = lookupContactNumber(target) ?: return "No number found for $target"
+        val rawNumber = resolvePhoneNumber(target) ?: return "No number found for $target"
 
         val digits = rawNumber.filter { it.isDigit() }
         val intlNumber = if (digits.length == 10) "91$digits" else digits
@@ -804,17 +1052,25 @@ private fun setAlarm(target: String?): String {
                 setPackage("com.whatsapp")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
-            JarvisAccessibilityService.instance?.autoTapSend()
-            if (JarvisAccessibilityService.instance != null) "Message prepared and sent to $target on WhatsApp, sir."
-            else "Opening WhatsApp for $target, sir. Tap Send to confirm, or enable the Accessibility Service for automatic delivery."
+            val accessibility = JarvisAccessibilityService.instance
+            accessibility?.autoTapSend("com.whatsapp", target)
+            if (accessibility != null) {
+                "WhatsApp opened with a prepared message for $target. An automatic Send attempt is allowed only when the expected chat is visible; delivery is not verified, so please check the chat."
+            } else {
+                "WhatsApp opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
+            }
         } catch (e: Exception) {
             try {
                 context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
-                JarvisAccessibilityService.instance?.autoTapSend()
-                if (JarvisAccessibilityService.instance != null) "Message prepared and sent to $target on WhatsApp, sir."
-                else "Opening WhatsApp for $target, sir. Tap Send to confirm, or enable the Accessibility Service for automatic delivery."
+                val accessibility = JarvisAccessibilityService.instance
+                accessibility?.autoTapSend("com.whatsapp", target)
+                if (accessibility != null) {
+                    "WhatsApp opened with a prepared message for $target. An automatic Send attempt is allowed only when the expected chat is visible; delivery is not verified, so please check the chat."
+                } else {
+                    "WhatsApp opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
+                }
             } catch (e2: Exception) {
                 "I was unable to open WhatsApp, sir. Please confirm it is installed."
             }
@@ -834,9 +1090,13 @@ private fun setAlarm(target: String?): String {
         val sent = messagingHelper.sendTelegram(target, message)
 
         return if (sent) {
-            JarvisAccessibilityService.instance?.autoTapSend()
-            if (JarvisAccessibilityService.instance != null) "Message prepared and sent to $target on Telegram, sir."
-            else "Opening Telegram for $target, sir. Tap Send to confirm, or enable the Accessibility Service for automatic delivery."
+            val accessibility = JarvisAccessibilityService.instance
+            accessibility?.autoTapSend("org.telegram.messenger", target)
+            if (accessibility != null) {
+                "Telegram opened with a prepared message for $target. An automatic Send attempt is allowed only when the expected chat is visible; delivery is not verified, so please check the chat."
+            } else {
+                "Telegram opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
+            }
         } else {
             "I was unable to open Telegram, sir. Please confirm it is installed."
         }
@@ -937,20 +1197,9 @@ private fun setAlarm(target: String?): String {
     private fun executeMultiStep(cmd: AssistantCommand): String {
         try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
         val steps = cmd.steps
-        if (steps.isNullOrEmpty()) {
-            return cmd.message?.takeIf { it.isNotBlank() } ?: "No steps to execute."
-        }
-        val out = mutableListOf<String>()
-        for (step in steps) {
-            try {
-                val r = execute(step)
-                if (r.isNotBlank()) out.add(r)
-            } catch (e: Exception) {
-                out.add("Step failed: ${e.message}")
-                break
-            }
-        }
-        return out.joinToString(" ").ifBlank { "Done." }
+        if (steps.isNullOrEmpty()) return "No steps to execute."
+        val report = MultiStepExecutor(context) { step -> execute(step) }.execute(steps)
+        return report.summary
     }
 
 
@@ -1071,14 +1320,17 @@ private fun setAlarm(target: String?): String {
     }
 
 
-    @Volatile private var riskBypass: Boolean = false
+    // A confirmation bypass belongs only to the current synchronous execution thread.
+    // A shared Boolean could let a concurrent, unconfirmed command skip the risk gate.
+    private val riskBypass = ThreadLocal.withInitial { false }
 
     fun executeConfirmed(cmd: AssistantCommand): String {
-        riskBypass = true
+        val previous = riskBypass.get()
+        riskBypass.set(true)
         try {
             return execute(cmd)
         } finally {
-            riskBypass = false
+            riskBypass.set(previous)
         }
     }
 

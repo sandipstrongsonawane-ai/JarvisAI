@@ -149,25 +149,64 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun autoTapSend(attemptsLeft: Int = 6) {
+    fun autoTapSend(expectedPackage: String, expectedRecipient: String, attemptsLeft: Int = 6) {
+        val allowedPackages = setOf("com.whatsapp", "org.telegram.messenger")
+        if (expectedPackage !in allowedPackages || expectedRecipient.isBlank()) {
+            Log.w("JarvisAccessibility", "autoTapSend: blocked invalid package or recipient")
+            return
+        }
         if (attemptsLeft <= 0) {
-            Log.w("JarvisAccessibility", "autoTapSend: gave up, no Send button found")
+            Log.w("JarvisAccessibility", "autoTapSend: gave up for $expectedPackage; no verified Send button found")
             return
         }
         handler.postDelayed({
             val root = rootInActiveWindow
-            if (root == null) {
-                autoTapSend(attemptsLeft - 1)
+            val activePackage = root?.packageName?.toString()
+            if (root == null || activePackage != expectedPackage) {
+                autoTapSend(expectedPackage, expectedRecipient, attemptsLeft - 1)
+                return@postDelayed
+            }
+            if (!containsRecipient(root, expectedRecipient)) {
+                Log.w("JarvisAccessibility", "autoTapSend: expected recipient not visible in $expectedPackage")
+                autoTapSend(expectedPackage, expectedRecipient, attemptsLeft - 1)
                 return@postDelayed
             }
             val target = findSendButton(root)
-            if (target != null) {
-                target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.d("JarvisAccessibility", "autoTapSend: tapped send button")
+            val clicked = try {
+                target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+            } catch (e: Exception) {
+                Log.w("JarvisAccessibility", "autoTapSend: click failed: ${e.message}")
+                false
+            }
+            if (clicked) {
+                Log.d("JarvisAccessibility", "autoTapSend: Send click accepted by $expectedPackage")
             } else {
-                autoTapSend(attemptsLeft - 1)
+                autoTapSend(expectedPackage, expectedRecipient, attemptsLeft - 1)
             }
         }, 700)
+    }
+
+    private fun containsRecipient(node: AccessibilityNodeInfo, expectedRecipient: String): Boolean {
+        val expected = expectedRecipient.trim()
+        val text = node.text?.toString().orEmpty()
+        val description = node.contentDescription?.toString().orEmpty()
+        val viewId = node.viewIdResourceName?.lowercase().orEmpty()
+        // Match only chat-header/title nodes, never a coincidental mention in message text.
+        val isChatHeader = viewId.contains("conversation_contact_name") ||
+            viewId.contains("action_bar_title") ||
+            viewId.contains("chat_title") ||
+            viewId.contains("toolbar_title")
+        if (isChatHeader) {
+            if (recipientHeaderMatches(text, expected) ||
+                recipientHeaderMatches(description, expected)
+            ) return true
+        }
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child ->
+                if (containsRecipient(child, expected)) return true
+            }
+        }
+        return false
     }
 
     private fun findSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
@@ -188,6 +227,24 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: JarvisAccessibilityService? = null
+
+        /**
+         * Fail closed: a partial name match (for example, "Raj" vs "Rajat")
+         * must never authorize an automatic message send.
+         */
+        internal fun recipientHeaderMatches(header: String, expectedRecipient: String): Boolean {
+            val expected = expectedRecipient.trim()
+            val actual = header.trim()
+            if (expected.isBlank() || actual.isBlank()) return false
+            if (actual.equals(expected, ignoreCase = true)) return true
+
+            val expectedDigits = expected.filter(Char::isDigit)
+            val actualDigits = actual.filter(Char::isDigit)
+            if (expectedDigits.length < 7 || actualDigits.isBlank()) return false
+            if (actualDigits == expectedDigits) return true
+            return expectedDigits.length >= 10 &&
+                actualDigits.takeLast(10) == expectedDigits.takeLast(10)
+        }
     }
 
     override fun onServiceConnected() {

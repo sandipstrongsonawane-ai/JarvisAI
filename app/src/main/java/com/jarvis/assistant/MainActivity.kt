@@ -9,6 +9,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Build
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +43,7 @@ class MainActivity : AppCompatActivity(),
 
     private var service: AssistantForegroundService? = null
     private var bound = false
+    private var binding = false
     private var pendingListen = false
 
     private lateinit var systemStatus: SystemStatusManager
@@ -59,24 +63,41 @@ class MainActivity : AppCompatActivity(),
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        startAssistantService()
+    ) { permissions ->
+        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true ||
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (audioGranted) {
+            val startWithManualListen = pendingListen
+            pendingListen = false
+            startAssistantService(
+                if (startWithManualListen)
+                    com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING
+                else null
+            )
+        } else {
+            pendingListen = false
+            uiState = uiState.copy(response = "Microphone permission is required to use Jarvis voice features.")
+            Toast.makeText(this, "Microphone permission denied. Voice features are unavailable.", Toast.LENGTH_LONG).show()
+        }
         fetchLocationAndWeather()
     }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            binding = false
+            bound = true
             service = (binder as AssistantForegroundService.LocalBinder).getService()
             service?.listener = this@MainActivity
             if (pendingListen) {
                 pendingListen = false
                 service?.startListeningCycle()
             }
-            bound = true
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             service = null
             bound = false
+            binding = false
         }
     }
 
@@ -174,12 +195,13 @@ class MainActivity : AppCompatActivity(),
         startPerfLoop()
 
         locationHelper = LocationHelper(this)
-        weatherClient = WeatherClient(apiKey = BuildConfig.OPENWEATHER_API_KEY)
+        weatherClient = WeatherClient(apiKey = settings.getOpenWeatherApiKey())
 
         permissionLauncher.launch(arrayOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.POST_NOTIFICATIONS
         ))
 
         scheduleFeedbackPromptCheck()
@@ -232,10 +254,14 @@ class MainActivity : AppCompatActivity(),
         }
     }
 
-    private fun startAssistantService() {
-        val intent = Intent(this, AssistantForegroundService::class.java)
+    private fun startAssistantService(action: String? = null) {
+        val intent = Intent(this, AssistantForegroundService::class.java).apply {
+            if (action != null) this.action = action
+        }
         startForegroundService(intent)
-        bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        if (!bound && !binding) {
+            binding = bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
     }
 
     override fun onStateChanged(state: BrainState) {
@@ -279,9 +305,43 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onResume() {
-        com.jarvis.assistant.ui.HudController.addListener(this)
         super.onResume()
+        com.jarvis.assistant.ui.HudController.addListener(this)
+        // Attach the optional companion only after the launcher activity is foregrounded.
+        try {
+            ensurePuppyOverlay()
+        } catch (_: Exception) {
+            // A companion overlay must never prevent the main assistant from opening.
+        }
         if (::settings.isInitialized) scheduleFeedbackPromptCheck()
+    }
+
+    private fun ensurePuppyOverlay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            val prefs = getSharedPreferences("jarvis_ui", MODE_PRIVATE)
+            if (!prefs.getBoolean("puppy_overlay_prompted", false)) {
+                prefs.edit().putBoolean("puppy_overlay_prompted", true).apply()
+                AlertDialog.Builder(this)
+                    .setTitle("Enable Puppy Companion")
+                    .setMessage("Allow Jarvis to show the small movable puppy over other apps. This is only for the puppy overlay.")
+                    .setPositiveButton("Open settings") { _, _ ->
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:$packageName")
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "Could not open overlay permission settings.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    .setNegativeButton("Not now", null)
+                    .show()
+            }
+            return
+        }
+        com.jarvis.assistant.ui.PuppyOverlay.show(applicationContext)
     }
 
     override fun onDestroy() {
@@ -297,11 +357,16 @@ class MainActivity : AppCompatActivity(),
 
     private fun showLastCrashIfAny() {
         try {
-            val prefs = getSharedPreferences("jarvis_crash", MODE_PRIVATE)
-            val last = prefs.getString("last_crash", null) ?: return
-            prefs.edit().remove("last_crash").apply()
-            Toast.makeText(this, "Last crash:\n${last.take(200)}", Toast.LENGTH_LONG).show()
-        } catch (_: Exception) {}
+            val last = com.jarvis.assistant.diagnostics.CrashHandler.consumeLastCrash(this) ?: return
+            val summary = last.lineSequence().take(8).joinToString("\n").take(900)
+            AlertDialog.Builder(this)
+                .setTitle("Jarvis previous crash report")
+                .setMessage(summary)
+                .setPositiveButton("OK", null)
+                .show()
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisCrash", "Could not display previous crash report", e)
+        }
     }
 
     private fun scheduleFeedbackPromptCheck() {
@@ -334,28 +399,37 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun ensureListening() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingListen = true
+            permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+            return
+        }
+
+        // If already bound, hand the mic directly to command STT.
+        val activeService = service
+        if (activeService != null) {
+            activeService.startListeningCycle()
+            return
+        }
+
+        // If the service is not connected yet, use the explicit manual-Listen action.
+        // onStartCommand will start command capture directly, without arming wake first.
+        val listenIntent = Intent(this, AssistantForegroundService::class.java).apply {
+            action = com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING
+        }
         try {
-            val i = Intent(this, AssistantForegroundService::class.java)
-            startForegroundService(i)
+            startForegroundService(listenIntent)
         } catch (_: Exception) {
             try {
-                startService(Intent(this, AssistantForegroundService::class.java))
+                startService(listenIntent)
             } catch (_: Exception) {}
         }
-        val s = service
-        if (s != null) {
-            s.startListeningCycle()
-        } else {
-            // Not bound yet — bind then listen on connect
-            pendingListen = true
+        if (!bound && !binding) {
             try {
-                bindService(
-                    Intent(this, AssistantForegroundService::class.java),
-                    connection,
-                    BIND_AUTO_CREATE
-                )
+                binding = bindService(listenIntent, connection, BIND_AUTO_CREATE)
             } catch (_: Exception) {}
         }
     }
-
 }
