@@ -231,8 +231,8 @@ class AssistantForegroundService : Service() {
             detector.stop()
             openWake = null
             android.util.Log.e("JarvisService", "On-device wake detector unavailable; microphone left idle (no STT beep fallback)")
-        } catch (e: Exception) {
-            try { openWake?.stop() } catch (_: Exception) {}
+        } catch (e: Throwable) {
+            try { openWake?.stop() } catch (_: Throwable) {}
             openWake = null
             android.util.Log.e("JarvisService", "On-device wake start failed; microphone left idle", e)
         }
