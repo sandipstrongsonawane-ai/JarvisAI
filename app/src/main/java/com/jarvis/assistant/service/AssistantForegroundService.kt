@@ -221,12 +221,13 @@ class AssistantForegroundService : Service() {
         wakeStartInProgress = true
         scope.launch(Dispatchers.IO) {
             val voicuteStarted = try {
-                voicuteWake?.start(onWake) {
+                val started = voicuteWake?.start(onWake) {
                     mainHandler.post {
                         wakeStartInProgress = false
                         if (!listenCycleRunning) scheduleWakeRetry()
                     }
                 } == true
+                started && voicuteWake?.isRunning() == true
             } catch (e: Exception) {
                 android.util.Log.e("JarvisService", "Voicute wake start failed: ${e.message}", e)
                 false

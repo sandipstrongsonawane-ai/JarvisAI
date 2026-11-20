@@ -101,6 +101,8 @@ class VoicuteWakeWordEngine(context: Context) {
         return true
     }
 
+    fun isRunning(): Boolean = running && capture?.isAlive == true
+
     @Synchronized
     fun stop() {
         running = false
