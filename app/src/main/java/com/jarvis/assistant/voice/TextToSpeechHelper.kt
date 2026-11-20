@@ -143,7 +143,7 @@ class TextToSpeechHelper(context: Context) {
             "आहे", "आहोत", "नाही", "काय", "म्हणजे", "करूया", "करतो", "करते",
             "बरं", "मस्त", "तुम्ही", "तुझं", "आणि", "पण", "झालं", "चालेल", "होईल"
         )
-        val hasDevanagari = text.any { it in '\\u0900'..'\\u097f' }
+        val hasDevanagari = text.any { it in 'अ'..'ॿ' }
         val hasMarathiHint = marathiHints.any { lower.contains(it) }
         return when {
             hasMarathiHint -> Locale("mr", "IN")
