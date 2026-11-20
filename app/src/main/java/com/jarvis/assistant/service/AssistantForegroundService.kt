@@ -77,6 +77,7 @@ class AssistantForegroundService : Service() {
     var listener: AssistantListener? = null
     private var lastListenCycleMs = 0L
     private var listenCycleRunning = false
+    @Volatile private var externalMicSessionActive = false
 
     interface AssistantListener {
         fun onStateChanged(state: BrainState)
@@ -138,11 +139,14 @@ class AssistantForegroundService : Service() {
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
         when (intent?.action) {
             ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC -> {
+                externalMicSessionActive = true
+                listenCycleRunning = false
                 releaseAllMics()
                 android.util.Log.i("JarvisService", "Wake microphone paused for an external capture session")
                 return START_STICKY
             }
             ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC -> {
+                externalMicSessionActive = false
                 startWakeWordListening()
                 android.util.Log.i("JarvisService", "Wake microphone resumed after external capture session")
                 return START_STICKY
@@ -191,6 +195,10 @@ class AssistantForegroundService : Service() {
     }
 
     private fun startWakeWordListening() {
+        if (externalMicSessionActive) {
+            android.util.Log.i("JarvisService", "Wake start blocked: external microphone session active")
+            return
+        }
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             android.util.Log.i("JarvisService", "Wake off in settings")
@@ -282,7 +290,9 @@ class AssistantForegroundService : Service() {
      * speak the next command without saying "Hey Jarvis" again.
      */
     private fun startFollowUpListen() {
+        if (externalMicSessionActive) return
         mainHandler.postDelayed({
+            if (externalMicSessionActive) return@postDelayed
             if (listenCycleRunning) return@postDelayed
             try { openWake?.stop() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
@@ -328,6 +338,10 @@ class AssistantForegroundService : Service() {
     }
 
     fun startListeningCycle() {
+        if (externalMicSessionActive) {
+            android.util.Log.i("JarvisService", "Listening cycle blocked: external microphone session active")
+            return
+        }
         if (androidx.core.content.ContextCompat.checkSelfPermission(
                 this,
                 android.Manifest.permission.RECORD_AUDIO
