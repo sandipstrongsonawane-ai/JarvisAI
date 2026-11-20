@@ -29,6 +29,7 @@ class VoiceAuthManager(private val context: Context) {
     private val enrollmentThreshold = 0.45f
     private val verificationThreshold = 0.50f
     @Volatile private var lastEnrollmentFailure: String? = null
+    @Volatile private var lastEmbeddingFailure: String? = null
 
     fun lastEnrollmentFailureReason(): String? = lastEnrollmentFailure
 
@@ -116,7 +117,8 @@ class VoiceAuthManager(private val context: Context) {
             val vector = embedding(sample)
             if (vector == null) {
                 android.util.Log.e("JarvisVoiceAuth", "Enrollment embedding failed for sample ${index + 1}")
-                lastEnrollmentFailure = "Voice model could not process sample ${index + 1}. Check mic level and retry."
+                lastEnrollmentFailure = lastEmbeddingFailure?.let { "Sample ${index + 1}: " + it }
+                    ?: "CAM++ could not create a voice embedding for sample ${index + 1}. Check microphone input and retry."
                 return@withContext false
             }
             vector
@@ -178,21 +180,58 @@ class VoiceAuthManager(private val context: Context) {
     }
 
     private fun embedding(samples: ShortArray): FloatArray? {
-        val extractor = try { getExtractor() } catch (_: Throwable) { return null }
-        val stream = try { extractor.createStream() } catch (_: Throwable) { return null }
+        lastEmbeddingFailure = null
+        val extractor = try {
+            getExtractor()
+        } catch (e: Throwable) {
+            lastEmbeddingFailure = "CAM++ model initialization failed (" + e.javaClass.simpleName + "): " + (e.message ?: "no detail")
+            android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty(), e)
+            return null
+        }
+        val stream = try {
+            extractor.createStream()
+        } catch (e: Throwable) {
+            lastEmbeddingFailure = "CAM++ stream creation failed (" + e.javaClass.simpleName + "): " + (e.message ?: "no detail")
+            android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty(), e)
+            return null
+        }
         return try {
             // Trim leading/trailing room silence before CAM++ embedding extraction.
             // The same path is used for enrollment and verification.
             val speech = trimSilence(samples)
+            if (speech.size < sampleRate * 12 / 10) {
+                lastEmbeddingFailure = "Captured speech is too short after silence trimming (" + (speech.size * 1000 / sampleRate) + " ms)."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                return null
+            }
             val floats = FloatArray(speech.size) { speech[it] / 32768.0f }
             stream.acceptWaveform(floats, sampleRate)
             stream.inputFinished()
             val vector = extractor.compute(stream)
-            if (vector.isEmpty() || vector.any { !it.isFinite() }) null else normalize(vector)
-        } catch (_: Throwable) {
+            if (vector.isEmpty()) {
+                lastEmbeddingFailure = "CAM++ returned an empty embedding. Audio was captured, but the model rejected this sample."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                null
+            } else if (vector.any { !it.isFinite() }) {
+                lastEmbeddingFailure = "CAM++ returned invalid numeric values for the captured sample."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                null
+            } else {
+                normalize(vector).also {
+                    if (it == null) {
+                        lastEmbeddingFailure = "CAM++ returned a zero-length speaker vector."
+                        android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            lastEmbeddingFailure = "CAM++ embedding failed (" + e.javaClass.simpleName + "): " + (e.message ?: "no detail")
+            android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty(), e)
             null
         } finally {
-            try { stream.release() } catch (_: Exception) {}
+            try { stream.release() } catch (e: Exception) {
+                android.util.Log.w("JarvisVoiceAuth", "Could not release CAM++ stream", e)
+            }
         }
     }
 
