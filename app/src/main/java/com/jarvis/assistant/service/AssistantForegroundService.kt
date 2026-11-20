@@ -108,6 +108,9 @@ class AssistantForegroundService : Service() {
         pcBridge = PcBridgeServer(this) { speech -> processSpeech(speech) }
         voiceAuth = com.jarvis.assistant.voice.VoiceAuthManager(this)
         porcupine = com.jarvis.assistant.voice.PorcupineWakeWord(this)
+        // Keep the on-device wake engine alive as the primary background mic owner.
+        // SpeechRecognizer is only a fallback if AudioRecord/model initialization fails.
+        openWake = com.jarvis.assistant.voice.OpenWakeWordEngine(this)
         offlineBrain = OfflineBrain(this, executor) { turnOn ->
             if (turnOn) pcBridge.start() else pcBridge.stop()
         }
@@ -125,12 +128,13 @@ class AssistantForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
-        // Siri-style: on-device KWS only (not continuous Google STT).
-        try { stt.stopContinuous() } catch (_: Exception) {}
-        startWakeWordListening()
+        // A manual Listen action owns the mic immediately; otherwise arm background wake.
         val action = intent?.action
+        try { stt.stopContinuous() } catch (_: Exception) {}
         if (action == com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING) {
             startListeningCycle()
+        } else {
+            startWakeWordListening()
         }
         return START_STICKY
     }
@@ -146,19 +150,53 @@ class AssistantForegroundService : Service() {
 
     private fun startWakeWordListening() {
         val sm = com.jarvis.assistant.util.SettingsManager(this)
-        if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
-            android.util.Log.i("JarvisService", "Wake off in settings")
+        if (!sm.getBackgroundListen() || !sm.getWakeWordEnabled()) {
+            android.util.Log.i(
+                "JarvisService",
+                "Background wake disabled (backgroundListen=${sm.getBackgroundListen()}, wakeWord=${sm.getWakeWordEnabled()})"
+            )
+            releaseAllMics()
             return
         }
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.e("JarvisService", "Wake mic unavailable: RECORD_AUDIO permission missing")
+            return
+        }
+
         listenCycleRunning = false
-        try { stt.stopContinuous() } catch (_: Exception) {}
+        try { stt.stopContinuous() } catch (e: Exception) {
+            android.util.Log.w("JarvisService", "STT stop before wake failed: ${e.message}")
+        }
         try { porcupine.stop() } catch (_: Exception) {}
         try { openWake?.stop() } catch (_: Exception) {}
-        try { Thread.sleep(200) } catch (_: Exception) {}
 
-        // STT-only wake (OpenWake/Porcupine skipped until stable on device)
-        android.util.Log.w("JarvisService", "Using STT continuous wake — say Hey Jarvis")
-        startSttWakeFallback()
+        // Primary path: local OpenWakeWord owns the microphone through AudioRecord.
+        // Never start Google SpeechRecognizer at the same time as this engine.
+        val started = try {
+            openWake?.start {
+                mainHandler.post {
+                    if (!listenCycleRunning) {
+                        android.util.Log.i("JarvisService", "OpenWakeWord callback -> command capture")
+                        startListeningCycle()
+                    } else {
+                        android.util.Log.d("JarvisService", "Ignoring duplicate wake during active command")
+                    }
+                }
+            } ?: false
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisService", "OpenWakeWord startup exception: ${e.message}", e)
+            false
+        }
+
+        if (started) {
+            android.util.Log.i("JarvisService", "MIC_PIPELINE: OpenWakeWord AudioRecord started")
+        } else {
+            android.util.Log.e("JarvisService", "MIC_PIPELINE: OpenWakeWord failed; starting SpeechRecognizer fallback")
+            startSttWakeFallback()
+        }
     }
 
     private fun startSttWakeFallback() {
