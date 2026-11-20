@@ -47,10 +47,10 @@ class OfflineBrain(
 
         // Destination-based navigation must be a real route action, not just opening Maps.
         val navigationDestination = sequenceOf(
-            Regex("""^(?:please\\s+)?(?:navigate|navigation|directions?|route)\\s+(?:(?:me|us)\\s+)?(?:to|for)?\\s*(.+)$""", RegexOption.IGNORE_CASE),
-            Regex("""^(?:take me|drive me|guide me)\\s+(?:to)?\\s*(.+)$""", RegexOption.IGNORE_CASE),
-            Regex("""^mujhe\\s+(.+?)\\s+(?:tak\\s+)?(?:le chalo|le jao|ka rasta batao|ka navigation karo)$""", RegexOption.IGNORE_CASE),
-            Regex("""^(.+?)\\s+(?:ka|ke liye)\\s+(?:rasta|raasta|navigation|directions?)\\s*(?:batao|dikhao|chalu karo)?$""", RegexOption.IGNORE_CASE)
+            Regex("""^(?:please\s+)?(?:navigate|navigation|directions?|route)\s+(?:(?:me|us)\s+)?(?:to|for)?\s*(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(?:take me|drive me|guide me)\s+(?:to)?\s*(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^mujhe\s+(.+?)\s+(?:tak\s+)?(?:le chalo|le jao|ka rasta batao|ka navigation karo)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(.+?)\s+(?:ka|ke liye)\s+(?:rasta|raasta|navigation|directions?)\s*(?:batao|dikhao|chalu karo)?$""", RegexOption.IGNORE_CASE)
         ).mapNotNull { it.find(cmd)?.groupValues?.getOrNull(1)?.trim() }
             .firstOrNull { it.isNotBlank() }
         if (navigationDestination != null) {
