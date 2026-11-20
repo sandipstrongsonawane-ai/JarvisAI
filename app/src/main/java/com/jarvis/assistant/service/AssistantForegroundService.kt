@@ -437,8 +437,24 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // After “Ji Sagar” finishes, open the long STT window
-        mainHandler.postDelayed({ beginStt(false) }, 1600L)
+        // Wait for the acknowledgement to finish instead of guessing its duration.
+        // This prevents STT from opening over the assistant's own voice and avoids
+        // an unnecessary fixed 1.6-second delay when the acknowledgement is short.
+        val ackWaitStartedAt = android.os.SystemClock.elapsedRealtime()
+        fun waitForAckToFinish() {
+            if (!listenCycleRunning) return
+            val waitedMs = android.os.SystemClock.elapsedRealtime() - ackWaitStartedAt
+            if (!tts.isSpeaking()) {
+                beginStt(false)
+            } else if (waitedMs >= 5000L) {
+                android.util.Log.w("JarvisService", "Wake acknowledgement exceeded 5s; stopping TTS before command capture")
+                tts.stop()
+                beginStt(false)
+            } else {
+                mainHandler.postDelayed({ waitForAckToFinish() }, 100L)
+            }
+        }
+        mainHandler.postDelayed({ waitForAckToFinish() }, 100L)
     }
 
 
