@@ -57,6 +57,15 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
 
     private val conversationHistory = mutableListOf<Pair<String, String>>()
 
+    // models.list is relatively expensive and the enabled model catalogue rarely changes.
+    // Cache per API-key fingerprint for six hours so voice replies do not wait for discovery
+    // on every Gemini fallback request.
+    @Volatile private var cachedModels: List<String> = emptyList()
+    @Volatile private var cachedApiKeyFingerprint: Int = 0
+    @Volatile private var cachedModelsAtMs: Long = 0L
+    private val modelCacheLock = Any()
+    private val modelCacheTtlMs = TimeUnit.HOURS.toMillis(6)
+
     suspend fun getCommand(userSpeech: String): AssistantCommand = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider()?.trim().orEmpty()
         if (apiKey.isBlank()) {
@@ -65,7 +74,7 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
 
         conversationHistory.add("user" to userSpeech)
         val requestBody = buildRequestBody()
-        val models = discoverAvailableModels(apiKey).ifEmpty { fallbackModels }
+        val models = availableModelsFor(apiKey)
         var lastError = "No Gemini model returned a response."
 
         for (model in models) {
@@ -129,6 +138,35 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
             put("contents", contentsArray)
             put("generationConfig", JSONObject().put("maxOutputTokens", 300))
         }
+    }
+
+    private fun availableModelsFor(apiKey: String): List<String> {
+        val fingerprint = apiKey.hashCode()
+        val now = System.currentTimeMillis()
+        val current = cachedModels
+        if (current.isNotEmpty() &&
+            cachedApiKeyFingerprint == fingerprint &&
+            now - cachedModelsAtMs < modelCacheTtlMs
+        ) {
+            return current
+        }
+
+        val startedAt = System.currentTimeMillis()
+        val discovered = discoverAvailableModels(apiKey)
+        android.util.Log.d(
+            "GeminiClient",
+            "Model discovery completed in ${System.currentTimeMillis() - startedAt}ms; models=${discovered.size}"
+        )
+        if (discovered.isNotEmpty()) {
+            synchronized(modelCacheLock) {
+                cachedModels = discovered
+                cachedApiKeyFingerprint = fingerprint
+                cachedModelsAtMs = System.currentTimeMillis()
+            }
+            return discovered
+        }
+        // Keep the known fallback path available if discovery is temporarily offline.
+        return fallbackModels
     }
 
     /**
