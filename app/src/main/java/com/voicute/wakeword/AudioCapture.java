@@ -75,7 +75,11 @@ public class AudioCapture {
     public boolean isAlive() { return alive; }
 
     /** Start capture and wait until AudioRecord is actually recording. */
-    public boolean start() {
+    public synchronized boolean start() {
+        if (captureThread != null && captureThread.isAlive()) {
+            Log.w(TAG, "Previous capture thread is still shutting down");
+            return false;
+        }
         running = true;
         alive = false;
         ringPos = 0;
@@ -105,28 +109,30 @@ public class AudioCapture {
     }
 
     /** Stop capture thread and release resources. */
-    public void stop() {
+    public synchronized void stop() {
         running = false;
         alive = false;
         signalStart();
-        if (captureThread != null) {
-            captureThread.interrupt();
-            try { captureThread.join(1000); } catch (InterruptedException ignored) {}
-            captureThread = null;
+        // AudioRecord.stop() unblocks a blocking read(). Resource release remains
+        // owned by captureLoop's finally block to avoid racing read()/release().
+        AudioRecord activeRecorder = recorder;
+        if (activeRecorder != null) {
+            try { activeRecorder.stop(); } catch (Exception ignored) {}
         }
-        releaseRecorder();
+        Thread thread = captureThread;
+        if (thread != null) {
+            thread.interrupt();
+            try { thread.join(1500); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (!thread.isAlive()) captureThread = null;
+        }
     }
 
-    /** Restart: stop old recorder and thread, then start fresh. */
-    public void restart() {
-        releaseRecorder();
-        alive = false;
-        if (captureThread != null && captureThread.isAlive()) {
-            captureThread.interrupt();
-            try { captureThread.join(2000); } catch (InterruptedException ignored) {}
-        }
-        captureThread = new Thread(this::captureLoop, "AudioCapture");
-        captureThread.start();
+    /** Restart only after the previous capture thread has fully terminated. */
+    public synchronized void restart() {
+        stop();
+        start();
     }
 
     private void releaseRecorder() {
@@ -221,21 +227,16 @@ public class AudioCapture {
                 }
             }
 
-            recorder.stop();
-            recorder.release();
-            recorder = null;
-            alive = false;
         } catch (Exception e) {
-            Log.e(TAG, "Capture thread crashed", e);
-            alive = false;
+            if (running) {
+                Log.e(TAG, "Capture thread crashed", e);
+                if (listener != null) listener.onMicError("Microphone startup/capture failed: " + e.getMessage());
+            }
             running = false;
             signalStart();
-            if (listener != null) listener.onMicError("Microphone startup/capture failed: " + e.getMessage());
-            if (recorder != null) {
-                try { recorder.stop(); } catch (Exception ignored) {}
-                try { recorder.release(); } catch (Exception ignored) {}
-                recorder = null;
-            }
+        } finally {
+            alive = false;
+            releaseRecorder();
         }
     }
 
