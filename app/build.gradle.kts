@@ -54,7 +54,7 @@ android {
     }
     packaging {
         jniLibs {
-            // sherpa-onnx and Voicute share ONNX Runtime in the APK.
+            // sherpa-onnx uses ONNX Runtime in the APK.
             // Keep one shared runtime copy instead of failing native merge.
             pickFirsts += "**/libonnxruntime.so"
         }
@@ -76,6 +76,8 @@ android {
 }
 
 dependencies {
+    implementation("xyz.rementia:openwakeword:0.1.5")
+    implementation("ai.picovoice:porcupine-android:3.0.3")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
     implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
         // The Android AAR already contains the sherpa JVM API classes.
@@ -244,48 +246,7 @@ val downloadVoiceChallengeAsrModel by tasks.registering {
 }
 
 
-val voicuteWakeAssets = layout.projectDirectory.dir("src/main/assets/voicute")
-val downloadVoicuteWakeAssets by tasks.registering {
-    outputs.dir(voicuteWakeAssets)
-    doLast {
-        val assetsDir = voicuteWakeAssets.asFile
-        assetsDir.mkdirs()
-        fun gitBlobSha1(file: java.io.File): String {
-            val digest = MessageDigest.getInstance("SHA-1")
-            digest.update("blob ${file.length()}\u0000".toByteArray(Charsets.UTF_8))
-            file.inputStream().use { input ->
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    digest.update(buffer, 0, count)
-                }
-            }
-            return digest.digest().joinToString("") { "%02x".format(it) }
-        }
-        fun fetchPinned(name: String, size: Long, blobSha: String) {
-            val target = assetsDir.resolve(name)
-            if (target.exists() && target.length() == size && gitBlobSha1(target) == blobSha) return
-            val temp = target.resolveSibling(target.name + ".part")
-            try {
-                URL("https://raw.githubusercontent.com/voicute/onnx-wakeword/main/models/" +
-                    (if (name == "heyjarvis_r1.onnx") "en/" else "") + name).openStream().use { input ->
-                    temp.outputStream().use { output -> input.copyTo(output) }
-                }
-                check(temp.length() == size) { "Voicute asset size mismatch: $name" }
-                check(gitBlobSha1(temp) == blobSha) { "Voicute asset Git SHA-1 mismatch: $name" }
-                check(temp.renameTo(target)) { "Could not install Voicute asset: $name" }
-            } finally {
-                if (temp.exists()) temp.delete()
-            }
-        }
-        fetchPinned("melspectrogram.onnx", 1087958L, "a3a60354eebe5fa4c7c9534851e4cb0bd7b0d06c")
-        fetchPinned("heyjarvis_r1.onnx", 130572L, "d5cb71e1bde0513627576df668d66fddea557b64")
-    }
-}
-
 tasks.named("preBuild").configure {
-    dependsOn(downloadVoicuteWakeAssets)
     dependsOn(downloadSpeakerModel)
     dependsOn(downloadVoiceChallengeAsrModel)
 }
