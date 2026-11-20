@@ -152,7 +152,8 @@ class CommandExecutor(private val context: Context) {
         val processState = android.app.ActivityManager.RunningAppProcessInfo()
         android.app.ActivityManager.getMyMemoryState(processState)
         val appVisible = context is android.app.Activity ||
-            processState.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+            processState.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+            processState.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
 
         if (appVisible) {
             context.startActivity(request)
