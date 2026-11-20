@@ -14,6 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Cloud TTS via ElevenLabs — natural female voice for Jarvis.
@@ -33,6 +34,7 @@ class ElevenLabsTtsClient(private val context: Context) {
 
     private var player: MediaPlayer? = null
     @Volatile private var activeCall: okhttp3.Call? = null
+    private val requestGeneration = AtomicLong(0L)
 
     val isConfigured: Boolean
         get() = settings.getElevenLabsApiKey().isNotBlank()
@@ -51,6 +53,7 @@ class ElevenLabsTtsClient(private val context: Context) {
     suspend fun speak(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isConfigured || text.isBlank()) return@withContext false
         stop()
+        val generation = requestGeneration.get()
         val cleaned = text
             .replace("...", ", ")
             .replace(" — ", ", ")
@@ -82,7 +85,7 @@ class ElevenLabsTtsClient(private val context: Context) {
             val call = client.newCall(request)
             activeCall = call
             call.execute().use { response ->
-                if (call.isCanceled()) return@withContext false
+                if (call.isCanceled() || requestGeneration.get() != generation) return@withContext false
                 if (!response.isSuccessful) {
                     val err = response.body?.string()?.take(200) ?: ""
                     Log.e(TAG, "ElevenLabs HTTP ${response.code}: $err")
@@ -91,12 +94,16 @@ class ElevenLabsTtsClient(private val context: Context) {
                 val bytes = response.body?.bytes() ?: return@withContext false
                 if (bytes.isEmpty()) return@withContext false
 
+                if (call.isCanceled() || requestGeneration.get() != generation) {
+                    activeCall = null
+                    return@withContext false
+                }
                 activeCall = null
                 val cache = File(context.cacheDir, "jarvis_tts_el.mp3")
                 cache.writeBytes(bytes)
 
                 withContext(Dispatchers.Main) {
-                    playFile(cache)
+                    if (requestGeneration.get() == generation) playFile(cache) else false
                 }
             }
         } catch (e: Exception) {
@@ -106,7 +113,6 @@ class ElevenLabsTtsClient(private val context: Context) {
     }
 
     private fun playFile(file: File): Boolean {
-        stop()
         return try {
             player = MediaPlayer().apply {
                 setAudioAttributes(
@@ -149,6 +155,7 @@ class ElevenLabsTtsClient(private val context: Context) {
     }
 
     fun stop() {
+        requestGeneration.incrementAndGet()
         try {
             activeCall?.cancel()
         } catch (_: Exception) {
