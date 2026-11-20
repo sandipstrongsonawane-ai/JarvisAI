@@ -11,7 +11,11 @@ internal object ReplyLanguageDetector {
         "kaay", "kuthe", "ithe", "tithe", "ikde", "tikde", "ata", "aata",
         "zala", "zalay", "jhala", "jhalay", "karuya", "karaycha", "karaychi",
         "kartoy", "kartey", "nahiye", "barobar", "changla", "changli",
-        "chhan", "mast", "hoil", "namaskar"
+        "chhan", "mast", "hoil", "namaskar",
+        "hai", "hain", "hoon", "hu", "mujhe", "mujhko", "kya", "kyun",
+        "kaise", "kaisa", "mera", "meri", "mere", "tum", "tumhe", "aap",
+        "karna", "karunga", "karo", "batao", "raha", "rahi", "abhi",
+        "yahan", "wahan", "hua", "kitna", "kab", "kahan", "theek", "accha", "acha"
     )
 
 
