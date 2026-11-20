@@ -104,32 +104,11 @@ class TextToSpeechHelper(context: Context) {
                 "hi" -> listOf(Locale("hi", "IN"), Locale("en", "IN"))
                 else -> listOf(Locale("en", "IN"), Locale.UK, Locale.US)
             }
-            val available = try { tts.voices } catch (_: Exception) { null }
-            var chosen = false
-            if (available != null) {
-                for (locale in localeCandidates) {
-                    val matching = available.filter {
-                        it.locale.language == locale.language &&
-                            (it.locale.country.isEmpty() || it.locale.country == locale.country)
-                    }
-                    if (matching.isEmpty()) continue
-                    val preferred = matching.firstOrNull { voiceNameSuggestsFeminine(it.name) }
-                        ?: matching.maxByOrNull { it.quality }
-                    if (preferred != null) {
-                        tts.voice = preferred
-                        chosen = true
-                        Log.i(TAG, "Selected TTS voice locale=${preferred.locale} name=${preferred.name}")
-                        break
-                    }
-                }
-            }
-            if (!chosen) {
-                val fallbackLocale = localeCandidates.firstOrNull { locale ->
-                    tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
-                } ?: Locale.getDefault()
-                val result = tts.setLanguage(fallbackLocale)
-                Log.i(TAG, "TTS language fallback=$fallbackLocale result=$result")
-            }
+            // Respect the Android engine's currently selected default voice.
+            // The previous quality-based fallback could silently select a male voice.
+            // Only set the requested language; do not replace the user's default voice.
+            val result = tts.setLanguage(requestedLocale)
+            Log.i(TAG, "Using Android default voice for locale=$requestedLocale result=$result")
             tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
             tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
         } catch (e: Exception) {
