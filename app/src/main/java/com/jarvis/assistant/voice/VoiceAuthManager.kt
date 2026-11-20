@@ -207,6 +207,13 @@ class VoiceAuthManager(private val context: Context) {
             val floats = FloatArray(speech.size) { speech[it] / 32768.0f }
             stream.acceptWaveform(floats, sampleRate)
             stream.inputFinished()
+            // sherpa-onnx requires IsReady before Compute; otherwise the native
+            // extractor may be asked to process insufficient feature frames.
+            if (!extractor.isReady(stream)) {
+                lastEmbeddingFailure = "CAM++ reports that this recording is too short or too quiet to produce speaker features. Keep speaking naturally for the full sample."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                return null
+            }
             val vector = extractor.compute(stream)
             if (vector.isEmpty()) {
                 lastEmbeddingFailure = "CAM++ returned an empty embedding. Audio was captured, but the model rejected this sample."
