@@ -17,7 +17,7 @@ class SettingsManager(context: Context) {
     fun getVoicePitch(): Float = prefs.getFloat("voice_pitch", 1.0f)
     fun setVoicePitch(pitch: Float) = prefs.edit().putFloat("voice_pitch", pitch).apply()
 
-    fun getVoiceType(): String = prefs.getString("voice_type", "male") ?: "male"
+    fun getVoiceType(): String = prefs.getString("voice_type", "female") ?: "female"
     fun setVoiceType(type: String) = prefs.edit().putString("voice_type", type).apply()
 
     /** Prefer ElevenLabs human voice when online + API key set (default on). */

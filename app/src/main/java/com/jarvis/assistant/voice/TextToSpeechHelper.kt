@@ -3,6 +3,7 @@ package com.jarvis.assistant.voice
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import com.jarvis.assistant.util.SettingsManager
 import java.util.Locale
@@ -10,27 +11,26 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * JARVIS TTS — Piper is used only for English; Hindi/Marathi always use
- * Hindi, Hinglish and English use Android/Piper voice routing. Android TTS remains the universal fallback.
+ * Female-first Android TTS. Cloud/API text is spoken through this same path.
+ * The bundled Piper model is male-only, so it is intentionally not selected.
  */
 class TextToSpeechHelper(context: Context) {
-
     private val app = context.applicationContext
     private val settings = SettingsManager(app)
-    private val piper = PiperTtsEngine(app)
-
     private var androidTts: TextToSpeech? = null
     private val androidReady = AtomicBoolean(false)
     private var pending: String? = null
 
     init {
+        // The user explicitly requested a female default; migrate the old male default.
+        if (settings.getVoiceType() != "female") settings.setVoiceType("female")
         androidTts = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 androidReady.set(true)
                 configureAndroidVoice()
-                pending?.let { t ->
+                pending?.let { queued ->
                     pending = null
-                    speak(t)
+                    speak(queued)
                 }
                 Log.i(TAG, "Android TTS ready")
             } else {
@@ -44,36 +44,14 @@ class TextToSpeechHelper(context: Context) {
                 Log.e(TAG, "Android TTS utterance error")
             }
         })
-        if (piper.isReady) Log.i(TAG, "Piper available for English replies")
-        else Log.w(TAG, "Piper unavailable — Android TTS will handle all languages")
     }
 
     fun speak(text: String) {
-        val cleaned = text
-            .replace("...", ", ")
+        val cleaned = text.replace("...", ", ")
             .replace(" — ", ", ")
             .replace(" – ", ", ")
             .trim()
         if (cleaned.isEmpty()) return
-
-        val replyLocale = ReplyLanguageDetector.detect(cleaned)
-        // The bundled Piper model is English-only. Never let it read Hindi or
-        // Hindi/Hinglish text with an English phoneme model, even if Piper is installed.
-        if (replyLocale.language == "en" && piper.isReady) {
-            try {
-                piper.stop()
-                if (piper.speak(cleaned)) {
-                    Log.i(TAG, "Spoke via Piper locale=$replyLocale")
-                    return
-                }
-                Log.w(TAG, "Piper speak failed — falling back to Android TTS")
-            } catch (e: Exception) {
-                Log.e(TAG, "Piper error: ${e.message}")
-            }
-        } else if (replyLocale.language != "en") {
-            Log.i(TAG, "Bypassing English-only Piper for locale=$replyLocale")
-        }
-
         speakAndroid(cleaned)
     }
 
@@ -88,50 +66,55 @@ class TextToSpeechHelper(context: Context) {
             configureAndroidVoice(text)
             tts.stop()
             val id = UUID.randomUUID().toString()
-            val r = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
-            if (r == TextToSpeech.ERROR) Log.e(TAG, "Android speak ERROR")
-            else Log.i(TAG, "Spoke via Android TTS locale=${ReplyLanguageDetector.detect(text)}")
+            val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            if (result == TextToSpeech.ERROR) Log.e(TAG, "Android speak ERROR")
+            else Log.i(TAG, "Spoke using female-first Android voice locale=${ReplyLanguageDetector.detect(text)}")
         } catch (e: Exception) {
-            Log.e(TAG, "Android speak failed: ${e.message}")
+            Log.e(TAG, "Android speak failed: ${e.message}", e)
         }
     }
 
     private fun configureAndroidVoice(text: String = "") {
         val tts = androidTts ?: return
         try {
-            val requestedLocale = ReplyLanguageDetector.detect(text)
-            val localeCandidates = when (requestedLocale.language) {
-                "hi" -> listOf(Locale("hi", "IN"), Locale("en", "IN"))
-                else -> listOf(Locale("en", "IN"), Locale.UK, Locale.US)
+            val locale = ReplyLanguageDetector.detect(text)
+            val languageResult = tts.setLanguage(locale)
+            val voices = tts.voices.orEmpty()
+            val femaleVoice = voices
+                .filter { it.locale.language.equals(locale.language, ignoreCase = true) }
+                .filter { voiceNameSuggestsFeminine(it.name) }
+                .maxByOrNull { it.quality }
+
+            if (femaleVoice != null) {
+                tts.voice = femaleVoice
+                Log.i(TAG, "Selected female TTS voice=${femaleVoice.name} locale=${femaleVoice.locale}")
+            } else {
+                Log.w(TAG, "No identifiable female voice installed for locale=$locale; retaining engine default (languageResult=$languageResult)")
             }
-            // Respect the Android engine's currently selected default voice.
-            // The previous quality-based fallback could silently select a male voice.
-            // Only set the requested language; do not replace the user's default voice.
-            val result = tts.setLanguage(requestedLocale)
-            Log.i(TAG, "Using Android default voice for locale=$requestedLocale result=$result")
             tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
             tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
         } catch (e: Exception) {
-            Log.w(TAG, "configureAndroidVoice: ${e.message}")
+            Log.w(TAG, "configureAndroidVoice: ${e.message}", e)
         }
     }
 
     private fun voiceNameSuggestsFeminine(name: String): Boolean {
         val lower = name.lowercase(Locale.ROOT)
-        return listOf("female", "woman", "feminine").any { lower.contains(it) }
+        return listOf(
+            "female", "woman", "feminine", "samantha", "zira", "jenny",
+            "aria", "sara", "karen", "moira", "tessa", "susan", "veena",
+            "lekha", "neerja", "hi-in-x-hia", "en-in-x-ene", "en-in-x-ena",
+            "en-us-x-sfg", "en-us-x-tpf"
+        ).any { lower.contains(it) }
     }
 
     fun stop() {
-        try { piper.stop() } catch (_: Exception) {}
         try { androidTts?.stop() } catch (_: Exception) {}
     }
 
     fun shutdown() {
         stop()
-        try { piper.release() } catch (_: Exception) {}
-        try {
-            androidTts?.shutdown()
-        } catch (_: Exception) {}
+        try { androidTts?.shutdown() } catch (_: Exception) {}
         androidTts = null
         androidReady.set(false)
     }
