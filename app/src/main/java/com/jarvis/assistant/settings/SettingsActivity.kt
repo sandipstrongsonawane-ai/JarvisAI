@@ -27,6 +27,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.jarvis.assistant.R
+import com.jarvis.assistant.ai.GeminiClient
+import com.jarvis.assistant.ai.JarvisLlmClient
 import com.jarvis.assistant.util.PersistentMemory
 import com.jarvis.assistant.util.SettingsManager
 import com.jarvis.assistant.voice.TextToSpeechHelper
@@ -35,9 +37,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -534,29 +533,28 @@ class SettingsActivity : AppCompatActivity() {
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    val client = OkHttpClient.Builder()
-                        .connectTimeout(12, TimeUnit.SECONDS)
-                        .readTimeout(15, TimeUnit.SECONDS)
-                        .build()
-                    val request = if (provider == "Groq") {
-                        Request.Builder()
-                            .url("https://api.groq.com/openai/v1/models")
-                            .header("Authorization", "Bearer $key")
-                            .get()
-                            .build()
+                    if (provider == "Groq") {
+                        val response = JarvisLlmClient(apiKeyProvider = { key }).chat("Reply with only the word OK.")
+                        if (response.ok) {
+                            "Groq generation successful."
+                        } else {
+                            "Groq generation failed: ${response.error.orEmpty().take(180)}"
+                        }
                     } else {
-                        Request.Builder()
-                            .url("https://generativelanguage.googleapis.com/v1beta/models")
-                            .header("x-goog-api-key", key)
-                            .get()
-                            .build()
+                        val response = GeminiClient(apiKeyProvider = { key })
+                            .getCommand("Reply with only the word OK.")
+                        val detail = response.message.orEmpty()
+                        if (detail.startsWith("Gemini API error") ||
+                            detail.startsWith("Gemini API key missing") ||
+                            detail.contains("available models abhi busy", ignoreCase = true)
+                        ) {
+                            "Gemini generation failed: ${detail.take(180)}"
+                        } else {
+                            "Gemini generation successful."
+                        }
                     }
-                    client.newCall(request).execute().use { response ->
-                        if (response.isSuccessful) "$provider connection successful."
-                        else "$provider test failed (HTTP ${response.code}). Check the key and provider access."
-                    }
-                } catch (_: Exception) {
-                    "$provider test failed. Check internet connection and try again."
+                } catch (e: Exception) {
+                    "$provider test failed: ${e.message.orEmpty().take(160)}"
                 }
             }
             toast(result)
@@ -581,8 +579,16 @@ class SettingsActivity : AppCompatActivity() {
             )
             for (i in prompts.indices) {
                 tts.speak(prompts[i])
-                // Allow the spoken instruction to finish before opening the microphone.
-                kotlinx.coroutines.delay(3200L)
+                // Wait for the selected cloud/local female voice before opening the microphone.
+                val promptFinished = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                    while (tts.isSpeaking()) kotlinx.coroutines.delay(100L)
+                    true
+                } ?: false
+                if (!promptFinished) {
+                    tts.stop()
+                    toast("Voice prompt did not finish. Please retry enrollment.")
+                    return@launch
+                }
                 val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(4000) }
                 if (sample == null) {
                     toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
