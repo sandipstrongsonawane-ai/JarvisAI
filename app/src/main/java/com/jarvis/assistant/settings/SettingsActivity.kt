@@ -568,9 +568,19 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Voice enrollment starting. Background wake word remains enabled. Say the exact same phrase for all three samples.")
+        toast("Voice enrollment starting. Background wake will pause briefly so enrollment can use the microphone, then resume automatically.")
         scope.launch {
-            val samples = mutableListOf<ShortArray>()
+            var wakePaused = false
+            try {
+                val pauseIntent = Intent(this@SettingsActivity, com.jarvis.assistant.service.AssistantForegroundService::class.java).apply {
+                    action = com.jarvis.assistant.service.AssistantForegroundService.ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC
+                }
+                ContextCompat.startForegroundService(this@SettingsActivity, pauseIntent)
+                wakePaused = true
+                // Let the foreground service stop and release AudioRecord before enrollment opens it.
+                kotlinx.coroutines.delay(700L)
+
+                val samples = mutableListOf<ShortArray>()
                 val enrollmentPhrase = "Meri awaaz pehchano"
                 val prompts = listOf(
                     "First sample. Say: $enrollmentPhrase",
@@ -607,6 +617,22 @@ class SettingsActivity : AppCompatActivity() {
                 voiceAuthStatus.text = voiceAuthStatusText()
                 toast("Neural voice enrolled and voice lock enabled.")
                 tts.speak("Voice enrollment complete. Voice lock is now enabled.")
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisSettings", "Voice enrollment failed", e)
+                toast("Voice enrollment failed: ${e.message ?: "unknown error"}")
+            } finally {
+                if (wakePaused) {
+                    try {
+                        val resumeIntent = Intent(this@SettingsActivity, com.jarvis.assistant.service.AssistantForegroundService::class.java).apply {
+                            action = com.jarvis.assistant.service.AssistantForegroundService.ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC
+                        }
+                        ContextCompat.startForegroundService(this@SettingsActivity, resumeIntent)
+                        android.util.Log.i("JarvisSettings", "Requested background wake resume after voice enrollment")
+                    } catch (e: Exception) {
+                        android.util.Log.e("JarvisSettings", "Could not resume background wake after enrollment", e)
+                    }
+                }
+            }
         }
     }
 
