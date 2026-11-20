@@ -45,9 +45,15 @@ class OfflineBrain(
         // Add to conversation history
         conversationContext.addMessage(text, isUserInput = true)
 
+        // A request to open navigation without a destination should open Maps, not route to the word "kholo".
+        if (containsAny(cmd, "open navigation", "navigation kholo", "start navigation", "maps navigation")) {
+            return executor.execute(AssistantCommand("open_app", "Maps"))
+        }
+
         // Destination-based navigation must be a real route action, not just opening Maps.
         val navigationDestination = sequenceOf(
-            Regex("""^(?:please\s+)?(?:navigate|navigation|directions?|route)\s+(?:(?:me|us)\s+)?(?:to|for)?\s*(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(?:please\s+)?(?:navigate|navigation|directions?|route)\s+(?:(?:me|us)\s+)?(?:to|for)\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^navigate\s+(.+)$""", RegexOption.IGNORE_CASE),
             Regex("""^(?:take me|drive me|guide me)\s+(?:to)?\s*(.+)$""", RegexOption.IGNORE_CASE),
             Regex("""^mujhe\s+(.+?)\s+(?:tak\s+)?(?:le chalo|le jao|ka rasta batao|ka navigation karo)$""", RegexOption.IGNORE_CASE),
             Regex("""^(.+?)\s+(?:ka|ke liye)\s+(?:rasta|raasta|navigation|directions?)\s*(?:batao|dikhao|chalu karo)?$""", RegexOption.IGNORE_CASE)
