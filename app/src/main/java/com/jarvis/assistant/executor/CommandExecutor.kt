@@ -50,8 +50,8 @@ class CommandExecutor(private val context: Context) {
                         ArrayList(missingPermissions)
                     )
                 }
-                context.startActivity(request)
-                "Jarvis needs permission to complete this action. Please allow access; I'll retry it automatically."
+                launchPermissionRequest(request, cmd, missingPermissions)
+                "Jarvis needs permission to complete this action. Please grant it from the permission prompt/notification; I'll retry automatically."
             } catch (e: Exception) {
                 android.util.Log.e("JarvisCommandExecutor", "Could not open permission request", e)
                 "Permission is required. Open Jarvis and retry this action."
@@ -143,6 +143,55 @@ class CommandExecutor(private val context: Context) {
         }
     }
 
+
+    private fun launchPermissionRequest(
+        request: Intent,
+        command: AssistantCommand,
+        missingPermissions: List<String>
+    ) {
+        val processState = android.app.ActivityManager.RunningAppProcessInfo()
+        android.app.ActivityManager.getMyMemoryState(processState)
+        val appVisible = context is android.app.Activity ||
+            processState.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+
+        if (appVisible) {
+            context.startActivity(request)
+            return
+        }
+
+        // Android restricts background services from opening permission dialogs.
+        // Post a user-tappable notification rather than silently pretending a dialog opened.
+        val channelId = "jarvis_action_permissions"
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    channelId,
+                    "Action permission requests",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                )
+            )
+        }
+        val pending = android.app.PendingIntent.getActivity(
+            context,
+            9200 + command.action.hashCode().and(0x7fff),
+            request,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = androidx.core.app.NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(com.jarvis.assistant.R.drawable.ic_mic)
+            .setContentTitle("Jarvis needs permission")
+            .setContentText("Tap to grant access and continue: ${missingPermissions.joinToString()}")
+            .setStyle(
+                androidx.core.app.NotificationCompat.BigTextStyle()
+                    .bigText("Tap to grant the required permission(s) and continue your pending Jarvis action.")
+            )
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        manager.notify(9200 + command.action.hashCode().and(0x7fff), notification)
+    }
 
     private fun requiredRuntimePermissions(command: AssistantCommand): List<String> {
         val permissions = linkedSetOf<String>()
