@@ -23,10 +23,13 @@ class MultiStepExecutor(
 
     fun execute(
         steps: List<AssistantCommand>,
-        paceMs: Long = 700L
+        paceMs: Long = 0L
     ): Report {
         if (steps.isEmpty()) {
             return Report(false, "No steps to execute.", emptyList())
+        }
+        if (steps.size > MAX_STEPS) {
+            return Report(false, "Sequence has ${steps.size} steps; the maximum is $MAX_STEPS.", emptyList())
         }
         val results = mutableListOf<String>()
         val total = steps.size
@@ -167,5 +170,6 @@ class MultiStepExecutor(
 
     companion object {
         private const val TAG = "MultiStepExecutor"
+        const val MAX_STEPS = 5
     }
 }

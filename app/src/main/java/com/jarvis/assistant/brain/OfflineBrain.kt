@@ -45,17 +45,16 @@ class OfflineBrain(
         // Add to conversation history
         conversationContext.addMessage(text, isUserInput = true)
 
-        // A small deterministic offline multi-action path; complex plans go to the AI brain.
-        Regex("""(?i)open\s+(.+?)\s+(?:and then|then|phir)\s+open\s+(.+)""")
-            .find(text)?.let { match ->
-                val steps = listOf(
-                    com.jarvis.assistant.model.AssistantCommand("open_app", match.groupValues[1].trim()),
-                    com.jarvis.assistant.model.AssistantCommand("open_app", match.groupValues[2].trim())
-                )
-                return executor.execute(
-                    com.jarvis.assistant.model.AssistantCommand("multi_step", steps = steps)
-                )
-            }
+        // Route supported deterministic chains through the same multi-step executor.
+        // This includes WhatsApp message chains; the executor's risk gate asks for confirmation.
+        val offlineSteps = com.jarvis.assistant.executor.MultiStepExecutor(context) { step ->
+            executor.execute(step)
+        }.parseOfflineChain(text)
+        if (!offlineSteps.isNullOrEmpty()) {
+            return executor.execute(
+                com.jarvis.assistant.model.AssistantCommand("multi_step", steps = offlineSteps)
+            )
+        }
 
         if (containsAny(cmd, "who is this", "identify person", "identify face", "who is that", "chehra pehchano")) {
             return try {

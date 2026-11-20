@@ -53,6 +53,17 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun rejectsSequencesAboveSafetyLimit() {
+        val steps = List(MultiStepExecutor.MAX_STEPS + 1) { index ->
+            AssistantCommand("open_app", target = "App$index")
+        }
+        val report = executor().execute(steps)
+        assertFalse(report.ok)
+        assertTrue(report.summary.contains("maximum is"))
+        assertTrue(report.stepResults.isEmpty())
+    }
+
+    @Test
     fun rejectsEmptySequence() {
         val report = executor().execute(emptyList(), paceMs = 0)
         assertFalse(report.ok)
