@@ -87,6 +87,7 @@ class AssistantForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "jarvis_channel"
         const val NOTIF_ID = 101
+        const val ACTION_EXECUTE_DEFERRED_COMMAND = "com.jarvis.assistant.EXECUTE_DEFERRED_COMMAND"
     }
 
     override fun onCreate() {
@@ -133,6 +134,26 @@ class AssistantForegroundService : Service() {
             return START_NOT_STICKY
         }
         startForeground(NOTIF_ID, buildNotification("J.A.R.V.I.S. online — say Hey Jarvis"))
+        if (intent?.action == ACTION_EXECUTE_DEFERRED_COMMAND) {
+            releaseAllMics()
+            val action = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION).orEmpty()
+            val target = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET)
+            val message = intent.getStringExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE)
+            scope.launch {
+                val command = com.jarvis.assistant.model.AssistantCommand(action, target, message)
+                val result = try {
+                    executeAssistantCommand(command, confirmed = true)
+                } catch (e: Exception) {
+                    android.util.Log.e("JarvisService", "Deferred action failed", e)
+                    "The action failed after permission was granted: ${e.message ?: "unknown error"}."
+                }
+                listener?.onStateChanged(BrainState.SPEAKING)
+                listener?.onResponse(result, false)
+                tts.speak(result)
+                resumeWakeSoon(2500L)
+            }
+            return START_STICKY
+        }
         // Siri-style: on-device KWS only (not continuous Google STT).
         try { stt.stopContinuous() } catch (_: Exception) {}
         startWakeWordListening()
