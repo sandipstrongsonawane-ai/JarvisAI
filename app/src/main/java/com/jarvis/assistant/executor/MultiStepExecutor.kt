@@ -161,9 +161,10 @@ class MultiStepExecutor(
     private fun isHardFail(out: String): Boolean {
         val l = out.lowercase()
         val keys = listOf(
-            "couldn't", "could not", "failed", "unable", "not found",
-            "permission", "i didn't understand", "unknown", "unknown setting", "error",
-            "which application", "which app"
+            "couldn't", "could not", "can't", "cannot", "failed", "unable", "not found",
+            "not installed", "doesn't appear", "does not appear", "no compatible app",
+            "permission", "denied", "i didn't understand", "unknown", "unknown setting", "error",
+            "which application", "which app", "no number"
         )
         return keys.any { l.contains(it) }
     }
