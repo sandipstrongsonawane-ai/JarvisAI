@@ -149,23 +149,34 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun autoTapSend(attemptsLeft: Int = 6) {
+    fun autoTapSend(expectedPackage: String, attemptsLeft: Int = 6) {
+        val allowedPackages = setOf("com.whatsapp", "org.telegram.messenger")
+        if (expectedPackage !in allowedPackages) {
+            Log.w("JarvisAccessibility", "autoTapSend: blocked unsupported package=$expectedPackage")
+            return
+        }
         if (attemptsLeft <= 0) {
-            Log.w("JarvisAccessibility", "autoTapSend: gave up, no Send button found")
+            Log.w("JarvisAccessibility", "autoTapSend: gave up for $expectedPackage; no verified Send button found")
             return
         }
         handler.postDelayed({
             val root = rootInActiveWindow
-            if (root == null) {
-                autoTapSend(attemptsLeft - 1)
+            val activePackage = root?.packageName?.toString()
+            if (root == null || activePackage != expectedPackage) {
+                autoTapSend(expectedPackage, attemptsLeft - 1)
                 return@postDelayed
             }
             val target = findSendButton(root)
-            if (target != null) {
-                target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.d("JarvisAccessibility", "autoTapSend: tapped send button")
+            val clicked = try {
+                target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+            } catch (e: Exception) {
+                Log.w("JarvisAccessibility", "autoTapSend: click failed: ${e.message}")
+                false
+            }
+            if (clicked) {
+                Log.d("JarvisAccessibility", "autoTapSend: Send click accepted by $expectedPackage")
             } else {
-                autoTapSend(attemptsLeft - 1)
+                autoTapSend(expectedPackage, attemptsLeft - 1)
             }
         }, 700)
     }

@@ -810,17 +810,25 @@ private fun setAlarm(target: String?): String {
                 setPackage("com.whatsapp")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
-            JarvisAccessibilityService.instance?.autoTapSend()
-            if (JarvisAccessibilityService.instance != null) "Message prepared and sent to $target on WhatsApp, sir."
-            else "Opening WhatsApp for $target, sir. Tap Send to confirm, or enable the Accessibility Service for automatic delivery."
+            val accessibility = JarvisAccessibilityService.instance
+            accessibility?.autoTapSend("com.whatsapp")
+            if (accessibility != null) {
+                "WhatsApp opened with a prepared message for $target. An automatic Send attempt was started, but delivery is not verified; please check the chat."
+            } else {
+                "WhatsApp opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
+            }
         } catch (e: Exception) {
             try {
                 context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
-                JarvisAccessibilityService.instance?.autoTapSend()
-                if (JarvisAccessibilityService.instance != null) "Message prepared and sent to $target on WhatsApp, sir."
-                else "Opening WhatsApp for $target, sir. Tap Send to confirm, or enable the Accessibility Service for automatic delivery."
+                val accessibility = JarvisAccessibilityService.instance
+                accessibility?.autoTapSend("com.whatsapp")
+                if (accessibility != null) {
+                    "WhatsApp opened with a prepared message for $target. An automatic Send attempt was started, but delivery is not verified; please check the chat."
+                } else {
+                    "WhatsApp opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
+                }
             } catch (e2: Exception) {
                 "I was unable to open WhatsApp, sir. Please confirm it is installed."
             }
@@ -840,9 +848,13 @@ private fun setAlarm(target: String?): String {
         val sent = messagingHelper.sendTelegram(target, message)
 
         return if (sent) {
-            JarvisAccessibilityService.instance?.autoTapSend()
-            if (JarvisAccessibilityService.instance != null) "Message prepared and sent to $target on Telegram, sir."
-            else "Opening Telegram for $target, sir. Tap Send to confirm, or enable the Accessibility Service for automatic delivery."
+            val accessibility = JarvisAccessibilityService.instance
+            accessibility?.autoTapSend("org.telegram.messenger")
+            if (accessibility != null) {
+                "Telegram opened with a prepared message for $target. An automatic Send attempt was started, but delivery is not verified; please check the chat."
+            } else {
+                "Telegram opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
+            }
         } else {
             "I was unable to open Telegram, sir. Please confirm it is installed."
         }
