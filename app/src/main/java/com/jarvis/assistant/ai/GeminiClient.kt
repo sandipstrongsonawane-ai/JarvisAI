@@ -45,7 +45,7 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
         - For toggle_setting, target is wifi, bluetooth, flashlight, or airplane_mode.
         - For set_volume, target is up, down, mute, max, or a 0-100 number.
         - For media_control, target is play, pause, next, or previous.
-        - For play_media, target is the song/artist/query.
+        - For play_media, target is the song/artist/query; message may specify youtube, youtube music, or spotify.\n        - For navigate, target is the exact destination/place and message is driving, walking, cycling, or transit.
         - For web_search, target is the search query.
         - For set_alarm, target is 24-hour HH:mm.
         - For set_timer, target is total duration in seconds.
