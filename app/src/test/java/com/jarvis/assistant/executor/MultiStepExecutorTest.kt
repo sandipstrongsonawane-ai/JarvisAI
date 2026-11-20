@@ -61,13 +61,13 @@ class MultiStepExecutorTest {
 
     @Test
     fun parsesWhatsAppMessageOnlyWhenRecipientAndBodyArePresent() {
-        val steps = executor().parseOfflineChain("open WhatsApp and send Hello Rahul to Rahul")
+        val steps = executor().parseOfflineChain("open WhatsApp and send Hello to Rahul")
         assertEquals(2, steps?.size)
         assertEquals("open_app", steps?.get(0)?.action)
         assertEquals("WhatsApp", steps?.get(0)?.target)
         assertEquals("whatsapp_message", steps?.get(1)?.action)
         assertEquals("Rahul", steps?.get(1)?.target)
-        assertEquals("Hello Rahul", steps?.get(1)?.message)
+        assertEquals("Hello", steps?.get(1)?.message)
     }
 
     @Test

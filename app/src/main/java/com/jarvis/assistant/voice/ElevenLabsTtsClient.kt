@@ -39,12 +39,9 @@ class ElevenLabsTtsClient(private val context: Context) {
     private val apiKey: String
         get() = BuildConfig.ELEVENLABS_API_KEY.trim()
 
-    /** Female voice is the default; an explicit custom BuildConfig voice ID remains supported. */
+    /** Always use the exact female voice ID selected by the user. */
     private val voiceId: String
-        get() {
-            val override = BuildConfig.ELEVENLABS_VOICE_ID.trim()
-            return if (override.isNotEmpty()) override else FEMALE_VOICE_ID
-        }
+        get() = FEMALE_VOICE_ID
 
     /**
      * Synthesize [text] and play. Returns true if audio started successfully.

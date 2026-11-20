@@ -76,7 +76,6 @@ class AssistantForegroundService : Service() {
     var listener: AssistantListener? = null
     private var lastListenCycleMs = 0L
     private var listenCycleRunning = false
-    @Volatile private var wakeStartInProgress = false
 
     interface AssistantListener {
         fun onStateChanged(state: BrainState)
@@ -160,7 +159,7 @@ class AssistantForegroundService : Service() {
             releaseAllMics()
             return
         }
-        if (listenCycleRunning || wakeStartInProgress) return
+        if (listenCycleRunning) return
 
         // Ensure only one microphone owner is active.
         try { stt.stopContinuous() } catch (_: Exception) {}
@@ -178,25 +177,17 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // AudioRecord initialization is awaited by the adapter. Run that wait off
-        // the main thread so a slow/busy microphone cannot freeze the service UI.
-        wakeStartInProgress = true
-        scope.launch(Dispatchers.IO) {
-            val voicuteStarted = try {
-                voicuteWake?.start(onWake) == true
-            } catch (e: Exception) {
-                android.util.Log.e("JarvisService", "Voicute wake start failed: ${e.message}", e)
-                false
-            }
-            mainHandler.post {
-                wakeStartInProgress = false
-                if (voicuteStarted) {
-                    android.util.Log.i("JarvisService", "Voicute on-device wake active — Hey Jarvis")
-                } else {
-                    android.util.Log.e("JarvisService", "Voicute microphone/model unavailable; no fallback engine will be started")
-                    try { stt.stopContinuous() } catch (_: Exception) {}
-                }
-            }
+        val voicuteStarted = try {
+            voicuteWake?.start(onWake) == true
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisService", "Voicute wake start failed: ${e.message}", e)
+            false
+        }
+        if (voicuteStarted) {
+            android.util.Log.i("JarvisService", "Voicute on-device wake active — Hey Jarvis")
+        } else {
+            android.util.Log.e("JarvisService", "Voicute wake model unavailable; no fallback engine will be started")
+            try { stt.stopContinuous() } catch (_: Exception) {}
         }
     }
 

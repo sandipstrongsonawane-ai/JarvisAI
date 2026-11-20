@@ -107,6 +107,8 @@ public class AudioCapture {
     /** Stop capture thread and release resources. */
     public void stop() {
         running = false;
+        alive = false;
+        signalStart();
         if (captureThread != null) {
             captureThread.interrupt();
             try { captureThread.join(1000); } catch (InterruptedException ignored) {}
