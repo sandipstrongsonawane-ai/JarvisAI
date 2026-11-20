@@ -212,98 +212,51 @@ class AssistantForegroundService : Service() {
         }
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
-            try { openWake?.stop() } catch (_: Exception) {}
-            openWake = null
-            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
             android.util.Log.i("JarvisService", "Wake off in settings")
             return
         }
-
-        // Invalidate older delayed starts so they cannot steal the microphone
-        // from a newer command/follow-up capture.
-        val generation = ++wakeStartGeneration
         listenCycleRunning = false
         try { stt.stopContinuous() } catch (_: Exception) {}
         try { porcupine.stop() } catch (_: Exception) {}
         try { openWake?.stop() } catch (_: Exception) {}
-        openWake = null
+        try { Thread.sleep(200) } catch (_: Exception) {}
 
-        // AudioRecord release is asynchronous on some Android builds. Do not block
-        // the main thread; start only after the release gap and re-check ownership.
-        mainHandler.postDelayed({
-            if (generation != wakeStartGeneration ||
-                externalMicSessionActive ||
-                listenCycleRunning
-            ) {
-                android.util.Log.d("JarvisService", "Discarding stale wake start generation=$generation")
-                return@postDelayed
-            }
-            try {
-                val detector = com.jarvis.assistant.voice.OpenWakeWordEngine(applicationContext)
-                openWake = detector
-                val started = detector.start(
-                    onWake = {
-                        mainHandler.post {
-                            if (openWake === detector && !listenCycleRunning && !externalMicSessionActive) {
-                                wakeResumeRetryAttempt = 0
-                                wakeResumeRetryPosted = false
-                                android.util.Log.i("JarvisService", "Hey Jarvis detected by on-device KWS")
-                                try { openWake?.stop() } catch (_: Exception) {}
-                                openWake = null
-                                try { porcupine.stop() } catch (_: Exception) {}
-                                try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
-                                try { com.jarvis.assistant.ui.ActivationEdgeOverlay.show(this@AssistantForegroundService) } catch (_: Exception) {}
-                                startListeningCycle()
-                            }
-                        }
-                    },
-                    onFailure = { error ->
-                        mainHandler.post {
-                            if (openWake === detector && generation == wakeStartGeneration) {
-                                try { detector.stop() } catch (_: Exception) {}
-                                openWake = null
-                                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
-                                listener?.onStateChanged(BrainState.IDLE)
-                                android.util.Log.e("JarvisService", "OpenWakeWord audio heartbeat failed; scheduling recovery", error)
-                                scheduleWakeResumeRetry()
-                            }
-                        }
-                    },
-                    onReady = {
-                        mainHandler.post {
-                            if (openWake === detector &&
-                                generation == wakeStartGeneration &&
-                                !externalMicSessionActive &&
-                                !listenCycleRunning
-                            ) {
-                                // A real score heartbeat proves AudioRecord + inference are alive.
-                                // Reset the retry budget here, not only after a wake detection.
-                                wakeResumeRetryAttempt = 0
-                                wakeResumeRetryPosted = false
-                                android.util.Log.i("JarvisService", "Background wake microphone confirmed active")
-                                try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
-                                listener?.onStateChanged(BrainState.LISTENING)
-                            }
-                        }
+        // STT-only wake (OpenWake/Porcupine skipped until stable on device)
+        android.util.Log.w("JarvisService", "Using STT continuous wake — say Hey Jarvis")
+        startSttWakeFallback()
+    }
+
+    private fun startSttWakeFallback() {
+        if (externalMicSessionActive) return
+        val sm = com.jarvis.assistant.util.SettingsManager(this)
+        if (!sm.getBackgroundListen()) {
+            android.util.Log.i("JarvisService", "Background listen off — STT wake idle")
+            try { stt.stopContinuous() } catch (_: Exception) {}
+            return
+        }
+        android.util.Log.i("JarvisService", "STT continuous wake (Hey Jarvis)")
+        try {
+            stt.listenContinuous { trailing ->
+                mainHandler.post {
+                    if (externalMicSessionActive) return@post
+                    try { stt.stopContinuous() } catch (_: Exception) {}
+                    try { porcupine.stop() } catch (_: Exception) {}
+                    try { openWake?.stop() } catch (_: Exception) {}
+                    if (trailing.isNotBlank()) {
+                        handleUserSpeech(trailing)
+                    } else {
+                        startListeningCycle()
                     }
-                )
-                if (started) {
-                    android.util.Log.i("JarvisService", "On-device OpenWakeWord start requested generation=$generation")
-                } else {
-                    detector.stop()
-                    if (openWake === detector) openWake = null
-                    try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
-                    android.util.Log.e("JarvisService", "On-device wake detector unavailable; scheduling retry")
-                    scheduleWakeResumeRetry()
+                    mainHandler.postDelayed({
+                        if (!externalMicSessionActive && !listenCycleRunning && com.jarvis.assistant.util.SettingsManager(this).getBackgroundListen()) {
+                            startWakeWordListening()
+                        }
+                    }, 5_000L)
                 }
-            } catch (e: Throwable) {
-                try { openWake?.stop() } catch (_: Throwable) {}
-                openWake = null
-                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
-                android.util.Log.e("JarvisService", "On-device wake start failed; scheduling retry", e)
-                scheduleWakeResumeRetry()
             }
-        }, 300L)
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisService", "STT wake failed: ${e.message}")
+        }
     }
 
 
