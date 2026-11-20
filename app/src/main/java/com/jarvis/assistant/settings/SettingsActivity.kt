@@ -515,17 +515,20 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Voice enrollment starting. Keep the phone near you and use the same phrase for all three samples.")
+        toast("Voice enrollment starting. Say the exact same phrase for all three samples.")
         scope.launch {
             val samples = mutableListOf<ShortArray>()
-            val prompts = listOf("First sample. Say your chosen phrase now.",
-                "Second sample. Repeat the same phrase.",
-                "Final sample. Repeat the same phrase once more.")
+            val enrollmentPhrase = "Jarvis, meri awaaz pehchano"
+            val prompts = listOf(
+                "First sample. Say: $enrollmentPhrase",
+                "Second sample. Repeat exactly: $enrollmentPhrase",
+                "Final sample. Repeat exactly: $enrollmentPhrase"
+            )
             for (i in prompts.indices) {
                 tts.speak(prompts[i])
-                // Give the spoken prompt time to finish before opening the recorder.
-                kotlinx.coroutines.delay(2200L)
-                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(2200) }
+                // Allow the spoken instruction to finish before opening the microphone.
+                kotlinx.coroutines.delay(3200L)
+                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(4000) }
                 if (sample == null) {
                     toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
                     tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
@@ -536,7 +539,8 @@ class SettingsActivity : AppCompatActivity() {
             }
             val enrolled = voiceAuth.enrollFromSamples(samples)
             if (!enrolled) {
-                toast("Neural voice enrollment failed. Please retry in a quiet place.")
+                toast("Voice samples did not match reliably. Keep the phone 15–20 cm away and repeat the exact phrase.")
+
                 tts.speak("Voice enrollment failed. Please try again.")
                 return@launch
             }
