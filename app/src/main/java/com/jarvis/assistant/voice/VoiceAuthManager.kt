@@ -26,7 +26,7 @@ class VoiceAuthManager(private val context: Context) {
 
     fun isEnabled(): Boolean = prefs.getBoolean("enabled", false)
     fun setEnabled(enabled: Boolean) = prefs.edit().putBoolean("enabled", enabled).apply()
-    fun isEnrolled(): Boolean = readEmbedding() != null
+    fun isEnrolled(): Boolean = readEmbeddings() != null
 
     fun resetEnrollment() {
         prefs.edit().remove("voice_embedding").remove("voiceprint").putBoolean("enabled", false).apply()
@@ -96,29 +96,24 @@ class VoiceAuthManager(private val context: Context) {
                 if (cosineSimilarity(vectors[i], vectors[j]) < threshold) return@withContext false
             }
         }
-        val average = FloatArray(dimension)
-        vectors.forEach { vector -> for (i in vector.indices) average[i] += vector[i] }
-        for (i in average.indices) average[i] /= vectors.size.toFloat()
-        val normalized = normalize(average) ?: return@withContext false
-        prefs.edit().putString("voice_embedding", normalized.joinToString(",")).apply()
+        // Keep each independent enrollment sample. Verification uses majority
+        // agreement across these stored speaker embeddings instead of one average.
+        val encoded = SpeakerEmbeddingMatcher.encode(vectors, threshold)
+            ?: return@withContext false
+        prefs.edit().putString("voice_embedding", encoded).apply()
         true
     }
 
     suspend fun verify(samples: ShortArray): Boolean = withContext(Dispatchers.Default) {
         if (samples.size < sampleRate * 12 / 10) return@withContext false
-        val enrolled = readEmbedding() ?: return@withContext false
+        val enrolled = readEmbeddings() ?: return@withContext false
         val candidate = embedding(samples) ?: return@withContext false
-        if (candidate.size != enrolled.size) return@withContext false
-        cosineSimilarity(enrolled, candidate) >= threshold
+        SpeakerEmbeddingMatcher.matches(enrolled, candidate, threshold)
     }
 
-    private fun readEmbedding(): FloatArray? {
+    private fun readEmbeddings(): List<FloatArray>? {
         val stored = prefs.getString("voice_embedding", null) ?: return null
-        val parts = stored.split(",")
-        if (parts.size !in 32..4096) return null
-        val vector = parts.map { it.toFloatOrNull() ?: return null }.toFloatArray()
-        if (vector.any { !it.isFinite() }) return null
-        return normalize(vector)
+        return SpeakerEmbeddingMatcher.decode(stored)
     }
 
     private fun embedding(samples: ShortArray): FloatArray? {
