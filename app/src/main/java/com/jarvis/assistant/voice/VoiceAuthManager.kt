@@ -81,19 +81,33 @@ class VoiceAuthManager(private val context: Context) {
             energy += normalized * normalized
         }
         val rms = kotlin.math.sqrt(energy / captured.size).toFloat()
-        return if (rms >= 0.004f && peak >= 500) captured else null
+        val accepted = rms >= 0.004f && peak >= 500
+        android.util.Log.i(
+            "JarvisVoiceAuth",
+            "capture durationMs=$durationMs samples=${captured.size} rms=$rms peak=$peak accepted=$accepted"
+        )
+        return if (accepted) captured else null
     }
 
     suspend fun enrollFromSamples(samples: List<ShortArray>): Boolean = withContext(Dispatchers.Default) {
         // Settings enrollment records three independent utterances. Do not silently
         // accept a partial enrollment or average embeddings from inconsistent speakers.
         if (samples.size < 3 || samples.any { it.size < sampleRate * 12 / 10 }) return@withContext false
-        val vectors = samples.map { embedding(it) ?: return@withContext false }
+        val vectors = samples.mapIndexed { index, sample ->
+            val vector = embedding(sample)
+            if (vector == null) {
+                android.util.Log.e("JarvisVoiceAuth", "Enrollment embedding failed for sample ${index + 1}")
+                return@withContext false
+            }
+            vector
+        }
         val dimension = vectors.first().size
         if (dimension <= 0 || vectors.any { it.size != dimension }) return@withContext false
         for (i in vectors.indices) {
             for (j in i + 1 until vectors.size) {
-                if (cosineSimilarity(vectors[i], vectors[j]) < threshold) return@withContext false
+                val similarity = cosineSimilarity(vectors[i], vectors[j])
+                android.util.Log.i("JarvisVoiceAuth", "Enrollment similarity sample ${i + 1}-${j + 1}=$similarity threshold=$threshold")
+                if (similarity < threshold) return@withContext false
             }
         }
         // Keep each independent enrollment sample. Verification uses majority
