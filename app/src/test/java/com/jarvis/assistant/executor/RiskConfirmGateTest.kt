@@ -17,6 +17,15 @@ class RiskConfirmGateTest {
     }
 
     @Test
+    fun directPhoneCallRequiresConfirmationAndNamesContact() {
+        val command = AssistantCommand("call", target = "Ramesh")
+        assertTrue(RiskConfirmGate.isRisky(command))
+        val prompt = RiskConfirmGate.promptFor(command)
+        assertTrue(prompt.contains("Ramesh"))
+        assertTrue(prompt.contains("confirm"))
+    }
+
+    @Test
     fun safeOpenAppChainDoesNotRequireSecondConfirmation() {
         val command = AssistantCommand(
             "multi_step",
