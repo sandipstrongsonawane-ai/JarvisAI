@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity(),
 
     private var service: AssistantForegroundService? = null
     private var bound = false
+    private var binding = false
     private var pendingListen = false
 
     private lateinit var systemStatus: SystemStatusManager
@@ -84,6 +85,8 @@ class MainActivity : AppCompatActivity(),
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            binding = false
+            bound = true
             service = (binder as AssistantForegroundService.LocalBinder).getService()
             service?.listener = this@MainActivity
             if (pendingListen) {
@@ -95,6 +98,7 @@ class MainActivity : AppCompatActivity(),
         override fun onServiceDisconnected(name: ComponentName?) {
             service = null
             bound = false
+            binding = false
         }
     }
 
@@ -256,7 +260,9 @@ class MainActivity : AppCompatActivity(),
             if (action != null) this.action = action
         }
         startForegroundService(intent)
-        bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        if (!bound && !binding) {
+            binding = bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
     }
 
     override fun onStateChanged(state: BrainState) {
@@ -421,8 +427,10 @@ class MainActivity : AppCompatActivity(),
                 startService(listenIntent)
             } catch (_: Exception) {}
         }
-        try {
-            bindService(listenIntent, connection, BIND_AUTO_CREATE)
-        } catch (_: Exception) {}
+        if (!bound && !binding) {
+            try {
+                binding = bindService(listenIntent, connection, BIND_AUTO_CREATE)
+            } catch (_: Exception) {}
+        }
     }
 }
