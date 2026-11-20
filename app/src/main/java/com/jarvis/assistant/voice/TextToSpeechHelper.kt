@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * JARVIS TTS — Piper is used only for English; Hindi/Marathi always use
- * a matching Android system voice. Android TTS remains the universal fallback.
+ * Hindi, Hinglish and English use Android/Piper voice routing. Android TTS remains the universal fallback.
  */
 class TextToSpeechHelper(context: Context) {
 
@@ -58,7 +58,7 @@ class TextToSpeechHelper(context: Context) {
 
         val replyLocale = ReplyLanguageDetector.detect(cleaned)
         // The bundled Piper model is English-only. Never let it read Hindi or
-        // Marathi text with an English phoneme model, even if Piper is installed.
+        // Hindi/Hinglish text with an English phoneme model, even if Piper is installed.
         if (replyLocale.language == "en" && piper.isReady) {
             try {
                 piper.stop()
@@ -101,8 +101,7 @@ class TextToSpeechHelper(context: Context) {
         try {
             val requestedLocale = ReplyLanguageDetector.detect(text)
             val localeCandidates = when (requestedLocale.language) {
-                "mr" -> listOf(Locale("mr", "IN"), Locale("hi", "IN"), Locale("en", "IN"))
-                "hi" -> listOf(Locale("hi", "IN"), Locale("mr", "IN"), Locale("en", "IN"))
+                "hi" -> listOf(Locale("hi", "IN"), Locale("en", "IN"))
                 else -> listOf(Locale("en", "IN"), Locale.UK, Locale.US)
             }
             val available = try { tts.voices } catch (_: Exception) { null }
