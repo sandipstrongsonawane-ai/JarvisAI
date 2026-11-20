@@ -197,15 +197,9 @@ class JarvisAccessibilityService : AccessibilityService() {
             viewId.contains("chat_title") ||
             viewId.contains("toolbar_title")
         if (isChatHeader) {
-            if (text.contains(expected, ignoreCase = true) ||
-                description.contains(expected, ignoreCase = true)
+            if (recipientHeaderMatches(text, expected) ||
+                recipientHeaderMatches(description, expected)
             ) return true
-            val expectedDigits = expected.filter(Char::isDigit)
-            if (expectedDigits.length >= 7) {
-                val expectedTail = expectedDigits.takeLast(10)
-                val headerDigits = (text + " " + description).filter(Char::isDigit)
-                if (headerDigits.contains(expectedTail)) return true
-            }
         }
         for (i in 0 until node.childCount) {
             node.getChild(i)?.let { child ->
@@ -233,6 +227,24 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: JarvisAccessibilityService? = null
+
+        /**
+         * Fail closed: a partial name match (for example, "Raj" vs "Rajat")
+         * must never authorize an automatic message send.
+         */
+        internal fun recipientHeaderMatches(header: String, expectedRecipient: String): Boolean {
+            val expected = expectedRecipient.trim()
+            val actual = header.trim()
+            if (expected.isBlank() || actual.isBlank()) return false
+            if (actual.equals(expected, ignoreCase = true)) return true
+
+            val expectedDigits = expected.filter(Char::isDigit)
+            val actualDigits = actual.filter(Char::isDigit)
+            if (expectedDigits.length < 7 || actualDigits.isBlank()) return false
+            if (actualDigits == expectedDigits) return true
+            return expectedDigits.length >= 10 &&
+                actualDigits.takeLast(10) == expectedDigits.takeLast(10)
+        }
     }
 
     override fun onServiceConnected() {
