@@ -344,11 +344,16 @@ class MainActivity : AppCompatActivity(),
 
     private fun showLastCrashIfAny() {
         try {
-            val prefs = getSharedPreferences("jarvis_crash", MODE_PRIVATE)
-            val last = prefs.getString("last_crash", null) ?: return
-            prefs.edit().remove("last_crash").apply()
-            Toast.makeText(this, "Last crash:\n${last.take(200)}", Toast.LENGTH_LONG).show()
-        } catch (_: Exception) {}
+            val last = com.jarvis.assistant.diagnostics.CrashHandler.consumeLastCrash(this) ?: return
+            val summary = last.lineSequence().take(8).joinToString("\n").take(900)
+            AlertDialog.Builder(this)
+                .setTitle("Jarvis previous crash report")
+                .setMessage(summary)
+                .setPositiveButton("OK", null)
+                .show()
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisCrash", "Could not display previous crash report", e)
+        }
     }
 
     private fun scheduleFeedbackPromptCheck() {
