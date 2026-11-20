@@ -30,6 +30,34 @@ class CommandExecutor(private val context: Context) {
             return com.jarvis.assistant.executor.RiskConfirmGate.hold(cmd)
         }
 
+        val missingPermissions = requiredRuntimePermissions(cmd).filter {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isNotEmpty()) {
+            return try {
+                val request = Intent(context, com.jarvis.assistant.RuntimePermissionActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, cmd.action)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, cmd.target)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, cmd.message)
+                    putExtra(
+                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON,
+                        commandToJson(cmd).toString()
+                    )
+                    putStringArrayListExtra(
+                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_PERMISSIONS,
+                        ArrayList(missingPermissions)
+                    )
+                }
+                context.startActivity(request)
+                "Jarvis needs permission to complete this action. Please allow access; I'll retry it automatically."
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisCommandExecutor", "Could not open permission request", e)
+                "Permission is required. Open Jarvis and retry this action."
+            }
+        }
+
         return try {
             when (ActionType.fromKey(cmd.action)) {
             ActionType.OPEN_APP -> openApp(cmd.target)
@@ -115,6 +143,53 @@ class CommandExecutor(private val context: Context) {
         }
     }
 
+
+    private fun requiredRuntimePermissions(command: AssistantCommand): List<String> {
+        val permissions = linkedSetOf<String>()
+        fun collect(item: AssistantCommand) {
+            when (ActionType.fromKey(item.action)) {
+                ActionType.CALL -> {
+                    if (item.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                    permissions += android.Manifest.permission.CALL_PHONE
+                }
+                ActionType.SEND_SMS -> {
+                    permissions += android.Manifest.permission.SEND_SMS
+                    if (item.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                ActionType.WHATSAPP_CALL,
+                ActionType.WHATSAPP_MESSAGE,
+                ActionType.TELEGRAM_MESSAGE -> {
+                    if (item.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                ActionType.MULTI_STEP -> item.steps.orEmpty().forEach(::collect)
+                else -> Unit
+            }
+        }
+        collect(command)
+        return permissions.toList()
+    }
+
+    private fun commandToJson(command: AssistantCommand): org.json.JSONObject {
+        val json = org.json.JSONObject()
+            .put("action", command.action)
+            .put("target", command.target)
+            .put("message", command.message)
+        val extra = org.json.JSONObject()
+        command.extra.forEach { (key, value) -> extra.put(key, value) }
+        json.put("extra", extra)
+        command.steps?.let { steps ->
+            val array = org.json.JSONArray()
+            steps.forEach { array.put(commandToJson(it)) }
+            json.put("steps", array)
+        }
+        return json
+    }
 
     private fun appCall(app: String?, kind: String?): String {
         if (app.isNullOrBlank()) return "Which app should I use for the call, sir?"
