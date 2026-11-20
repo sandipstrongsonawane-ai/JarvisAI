@@ -512,7 +512,8 @@ class SettingsActivity : AppCompatActivity() {
                             .build()
                     } else {
                         Request.Builder()
-                            .url("https://generativelanguage.googleapis.com/v1beta/models?key=" + android.net.Uri.encode(key))
+                            .url("https://generativelanguage.googleapis.com/v1beta/models")
+                            .header("x-goog-api-key", key)
                             .get()
                             .build()
                     }

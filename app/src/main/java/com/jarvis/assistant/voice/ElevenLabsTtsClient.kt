@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Cloud TTS via ElevenLabs — natural female voice for Jarvis.
  *
- * Free tier: https://elevenlabs.io → API key in local.properties as ELEVENLABS_API_KEY
+ * Add the ElevenLabs API key in Jarvis Settings; it is stored with Android Keystore encryption.
  * Optional: ELEVENLABS_VOICE_ID (dashboard → Voices → copy ID)
  *
  * The selected female voice is the default. An explicit custom voice ID can override it.
