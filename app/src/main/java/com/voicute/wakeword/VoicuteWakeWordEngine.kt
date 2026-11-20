@@ -30,6 +30,7 @@ class VoicuteWakeWordEngine(context: Context) {
         val activeCapture = AudioCapture()
         activeCapture.setListener { message ->
             Log.e(TAG, "Voicute microphone error: $message")
+            running = false
             onError?.invoke()
         }
         val gates = detection

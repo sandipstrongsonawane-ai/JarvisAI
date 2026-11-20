@@ -180,8 +180,6 @@ public class AudioCapture {
 
             short[] readChunk = new short[WakeWordEngine.MEL_HOP_SAMPLES * 8];
             long lastCaptureLog = 0;
-            long recordStartMs = System.currentTimeMillis();
-            float maxRmsSinceStart = 0;
             int zeroReadCount = 0;
 
             while (running && !Thread.interrupted()) {
@@ -190,8 +188,12 @@ public class AudioCapture {
                 // Zero reads = mic is being held by another app (e.g. voice assistant)
                 if (read <= 0) {
                     zeroReadCount++;
-                    if (zeroReadCount > 10 && listener != null) {
-                        listener.onMicError("麦克风被占用，请关闭其他使用麦克风的应用");
+                    if (zeroReadCount > 10) {
+                        if (listener != null) {
+                            listener.onMicError("AudioRecord returned repeated empty reads");
+                        }
+                        running = false;
+                        break;
                     }
                     continue;
                 }
@@ -207,16 +209,8 @@ public class AudioCapture {
                 // Track RMS for silence detection and activity monitoring
                 float rms = rmsOf(readChunk, read);
                 latestRms = rms;
-                if (rms > maxRmsSinceStart) maxRmsSinceStart = rms;
                 if (rms > 200) {
                     lastAudioActivityMs = System.currentTimeMillis();
-                }
-
-                // After 3 seconds, if we've never seen loud audio, the mic is
-                // probably claimed by another app (common on some OEM ROMs)
-                if ((System.currentTimeMillis() - recordStartMs) > 3000
-                        && maxRmsSinceStart < 50 && listener != null) {
-                    listener.onMicError("麦克风被占用，请关闭其他使用麦克风的应用");
                 }
 
                 long now = System.currentTimeMillis();
