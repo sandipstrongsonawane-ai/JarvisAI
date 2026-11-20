@@ -151,7 +151,7 @@ class CommandExecutor(private val context: Context) {
 
     private fun whatsappCall(name: String?, video: Boolean): String {
         if (name.isNullOrBlank()) return "Whom should I call on WhatsApp, sir?"
-        val number = lookupContactNumber(name)
+        val number = resolvePhoneNumber(name)
             ?: return "I couldn't find a number for $name, sir."
         val digits = number.filter { it.isDigit() }
         if (digits.length < 8) return "Number for $name looks invalid, sir."
@@ -388,6 +388,27 @@ class CommandExecutor(private val context: Context) {
             }
         }
 
+        // Some OEM builds expose YouTube through a browsable URL but not a launch intent.
+        if (q == "youtube" || q == "yt") {
+            val youtubeUri = Uri.parse("https://www.youtube.com/")
+            val appIntent = Intent(Intent.ACTION_VIEW, youtubeUri).apply {
+                setPackage("com.google.android.youtube")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                if (appIntent.resolveActivity(pm) != null) {
+                    context.startActivity(appIntent)
+                    return "Opening YouTube."
+                }
+                val browserIntent = Intent(Intent.ACTION_VIEW, youtubeUri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(browserIntent)
+                return "Opening YouTube in your browser."
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisCommandExecutor", "YouTube launch failed", e)
+                return "Couldn't open YouTube: ${e.message ?: "no compatible app"}."
+            }
+        }
+
         // Browser fallback if Chrome package missing / restricted
         if (q.contains("chrome") || q.contains("browser")) {
             try {
@@ -434,7 +455,7 @@ class CommandExecutor(private val context: Context) {
     // Requires CALL_PHONE permission granted at runtime.
     private fun callContact(name: String?): String {
         if (name.isNullOrBlank()) return "Whom shall I call, sir?"
-        val number = lookupContactNumber(name) ?: return "I couldn't locate a number for $name, sir."
+        val number = resolvePhoneNumber(name) ?: return "I couldn't locate a number for $name, sir."
         val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -445,9 +466,16 @@ class CommandExecutor(private val context: Context) {
     // Requires SEND_SMS permission granted at runtime.
     private fun sendSms(name: String?, message: String?): String {
         if (name.isNullOrBlank() || message.isNullOrBlank()) return "I need both a recipient and a message, sir."
-        val number = lookupContactNumber(name) ?: return "I couldn't locate a number for $name, sir."
+        val number = resolvePhoneNumber(name) ?: return "I couldn't locate a number for $name, sir."
         SmsManager.getDefault().sendTextMessage(number, null, message, null, null)
         return "Message sent to $name, sir."
+    }
+
+    private fun resolvePhoneNumber(value: String): String? {
+        val candidate = value.trim()
+        val digits = candidate.filter { it.isDigit() }
+        if (digits.length in 8..15) return candidate
+        return lookupContactNumber(candidate)
     }
 
     private fun lookupContactNumber(name: String): String? {
@@ -808,7 +836,7 @@ private fun setAlarm(target: String?): String {
     private fun whatsappMessage(target: String?, message: String?): String {
         if (target.isNullOrBlank()) return "Send a WhatsApp message to whom?"
         if (message.isNullOrBlank()) return "What should the message say?"
-        val rawNumber = lookupContactNumber(target) ?: return "No number found for $target"
+        val rawNumber = resolvePhoneNumber(target) ?: return "No number found for $target"
 
         val digits = rawNumber.filter { it.isDigit() }
         val intlNumber = if (digits.length == 10) "91$digits" else digits
