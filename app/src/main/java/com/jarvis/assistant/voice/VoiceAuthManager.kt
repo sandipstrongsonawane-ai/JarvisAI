@@ -31,7 +31,9 @@ class VoiceAuthManager(private val context: Context) {
     fun isEnrolled(): Boolean = readEmbeddings() != null
 
     fun resetEnrollment() {
-        secureStore.put("voice_embedding", "")
+        try { secureStore.put("voice_embedding", "") } catch (e: Exception) {
+            android.util.Log.w("JarvisVoiceAuth", "Could not clear encrypted voice template: ${e.message}")
+        }
         prefs.edit().remove("voice_embedding").remove("voiceprint").putBoolean("enabled", false).apply()
     }
 
@@ -117,9 +119,14 @@ class VoiceAuthManager(private val context: Context) {
         // agreement across these stored speaker embeddings instead of one average.
         val encoded = SpeakerEmbeddingMatcher.encode(vectors, threshold)
             ?: return@withContext false
-        secureStore.put("voice_embedding", encoded)
-        prefs.edit().remove("voice_embedding").remove("voiceprint").apply()
-        true
+        try {
+            secureStore.put("voice_embedding", encoded)
+            prefs.edit().remove("voice_embedding").remove("voiceprint").apply()
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisVoiceAuth", "Could not encrypt enrolled speaker template", e)
+            false
+        }
     }
 
     suspend fun verify(samples: ShortArray): Boolean = withContext(Dispatchers.Default) {
