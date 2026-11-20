@@ -565,6 +565,30 @@ class AssistantForegroundService : Service() {
         command: com.jarvis.assistant.model.AssistantCommand,
         confirmed: Boolean = false
     ): String {
+        val requiredPermissions = requiredRuntimePermissions(command)
+        val missingPermissions = requiredPermissions.filter {
+            androidx.core.content.ContextCompat.checkSelfPermission(this, it) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isNotEmpty()) {
+            return try {
+                val request = Intent(this, com.jarvis.assistant.RuntimePermissionActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, command.action)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, command.target)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, command.message)
+                    putStringArrayListExtra(
+                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_PERMISSIONS,
+                        ArrayList(missingPermissions)
+                    )
+                }
+                startActivity(request)
+                "Jarvis needs permission to complete this action. Please allow the requested access; I'll retry it automatically."
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisService", "Could not open permission request", e)
+                "Permission is required. Open Jarvis and retry this action."
+            }
+        }
         if (command.action == "pc_connect") {
             return when (command.target?.trim()?.lowercase()) {
                 "on", "start", "enable", "connect" -> pcBridge.start()
@@ -573,6 +597,37 @@ class AssistantForegroundService : Service() {
             }
         }
         return if (confirmed) executor.executeConfirmed(command) else executor.execute(command)
+    }
+
+    private fun requiredRuntimePermissions(command: com.jarvis.assistant.model.AssistantCommand): List<String> {
+        val permissions = linkedSetOf<String>()
+        fun collect(cmd: com.jarvis.assistant.model.AssistantCommand) {
+            when (com.jarvis.assistant.model.ActionType.fromKey(cmd.action)) {
+                com.jarvis.assistant.model.ActionType.CALL -> {
+                    if (cmd.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                    permissions += android.Manifest.permission.CALL_PHONE
+                }
+                com.jarvis.assistant.model.ActionType.SEND_SMS -> {
+                    permissions += android.Manifest.permission.SEND_SMS
+                    if (cmd.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                com.jarvis.assistant.model.ActionType.WHATSAPP_CALL,
+                com.jarvis.assistant.model.ActionType.WHATSAPP_MESSAGE,
+                com.jarvis.assistant.model.ActionType.TELEGRAM_MESSAGE -> {
+                    if (cmd.target?.filter { it.isDigit() }.orEmpty().length < 8) {
+                        permissions += android.Manifest.permission.READ_CONTACTS
+                    }
+                }
+                com.jarvis.assistant.model.ActionType.MULTI_STEP -> cmd.steps.orEmpty().forEach(::collect)
+                else -> Unit
+            }
+        }
+        collect(command)
+        return permissions.toList()
     }
 
     /**
