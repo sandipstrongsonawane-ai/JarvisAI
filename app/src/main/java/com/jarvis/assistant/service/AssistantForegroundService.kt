@@ -78,6 +78,8 @@ class AssistantForegroundService : Service() {
     private var lastListenCycleMs = 0L
     private var listenCycleRunning = false
     @Volatile private var externalMicSessionActive = false
+    private var wakeResumeRetryAttempt = 0
+    private var wakeResumeRetryPosted = false
 
     interface AssistantListener {
         fun onStateChanged(state: BrainState)
@@ -147,8 +149,10 @@ class AssistantForegroundService : Service() {
             }
             ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC -> {
                 externalMicSessionActive = false
-                startWakeWordListening()
-                android.util.Log.i("JarvisService", "Wake microphone resumed after external capture session")
+                wakeResumeRetryAttempt = 0
+                android.util.Log.i("JarvisService", "Wake microphone resume requested after external capture session")
+                // AudioRecord release can lag behind the enrollment Activity/TTS teardown.
+                mainHandler.postDelayed({ startWakeWordListening() }, 700L)
                 return START_STICKY
             }
         }
@@ -225,17 +229,35 @@ class AssistantForegroundService : Service() {
                 }
             }
             if (started) {
+                wakeResumeRetryAttempt = 0
+                wakeResumeRetryPosted = false
                 android.util.Log.i("JarvisService", "On-device OpenWakeWord armed; continuous STT disabled")
                 return
             }
             detector.stop()
             openWake = null
-            android.util.Log.e("JarvisService", "On-device wake detector unavailable; microphone left idle (no STT beep fallback)")
+            android.util.Log.e("JarvisService", "On-device wake detector unavailable; scheduling bounded retry")
+            scheduleWakeResumeRetry()
         } catch (e: Throwable) {
             try { openWake?.stop() } catch (_: Throwable) {}
             openWake = null
-            android.util.Log.e("JarvisService", "On-device wake start failed; microphone left idle", e)
+            android.util.Log.e("JarvisService", "On-device wake start failed; scheduling bounded retry", e)
+            scheduleWakeResumeRetry()
         }
+    }
+
+    private fun scheduleWakeResumeRetry() {
+        if (externalMicSessionActive || wakeResumeRetryPosted || wakeResumeRetryAttempt >= 3) return
+        val sm = com.jarvis.assistant.util.SettingsManager(this)
+        if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) return
+        wakeResumeRetryPosted = true
+        wakeResumeRetryAttempt += 1
+        val delayMs = 900L * wakeResumeRetryAttempt
+        android.util.Log.w("JarvisService", "Wake restart retry $wakeResumeRetryAttempt/3 in ${delayMs}ms")
+        mainHandler.postDelayed({
+            wakeResumeRetryPosted = false
+            if (!externalMicSessionActive) startWakeWordListening()
+        }, delayMs)
     }
 
 
