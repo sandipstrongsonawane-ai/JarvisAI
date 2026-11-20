@@ -623,7 +623,15 @@ class AssistantForegroundService : Service() {
         val phrase = com.jarvis.assistant.voice.VoiceChallenge.create()
         withContext(Dispatchers.Main) {
             tts.speak("Voice security check. Say these four words: $phrase")
-            delay(4000L)
+        }
+        val promptFinished = withTimeoutOrNull(20_000L) {
+            while (tts.isSpeaking()) delay(100L)
+            true
+        } ?: false
+        if (!promptFinished) {
+            android.util.Log.w("JarvisService", "Voice challenge prompt did not finish; refusing to capture during playback")
+            tts.stop()
+            return false
         }
 
         // One microphone recording feeds both the offline ASR and CAM++ speaker model.
