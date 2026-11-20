@@ -144,6 +144,7 @@ class AssistantForegroundService : Service() {
                 externalMicSessionActive = true
                 listenCycleRunning = false
                 releaseAllMics()
+                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
                 android.util.Log.i("JarvisService", "Wake microphone paused for an external capture session")
                 return START_STICKY
             }
@@ -205,6 +206,7 @@ class AssistantForegroundService : Service() {
         }
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
+            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
             android.util.Log.i("JarvisService", "Wake off in settings")
             return
         }
@@ -231,16 +233,19 @@ class AssistantForegroundService : Service() {
             if (started) {
                 wakeResumeRetryAttempt = 0
                 wakeResumeRetryPosted = false
-                android.util.Log.i("JarvisService", "On-device OpenWakeWord armed; continuous STT disabled")
+                try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
+                android.util.Log.i("JarvisService", "On-device OpenWakeWord armed; HUD now reflects active wake listening")
                 return
             }
             detector.stop()
             openWake = null
+            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
             android.util.Log.e("JarvisService", "On-device wake detector unavailable; scheduling bounded retry")
             scheduleWakeResumeRetry()
         } catch (e: Throwable) {
             try { openWake?.stop() } catch (_: Throwable) {}
             openWake = null
+            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
             android.util.Log.e("JarvisService", "On-device wake start failed; scheduling bounded retry", e)
             scheduleWakeResumeRetry()
         }
