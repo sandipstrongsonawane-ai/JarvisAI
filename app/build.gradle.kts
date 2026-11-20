@@ -30,6 +30,7 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"\"")
         buildConfigField("String", "OPENWEATHER_API_KEY", "\"\"")
         buildConfigField("String", "GROQ_API_KEY", "\"\"")
+        buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"\"")
         buildConfigField("String", "ELEVENLABS_API_KEY", "\"\"")
         // Optional: Voices → copy ID from https://elevenlabs.io/app/voice-library
     }
