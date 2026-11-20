@@ -3,7 +3,10 @@ package com.jarvis.assistant.ai
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class GeminiClientParsingTest {
     private fun parse(json: String): com.jarvis.assistant.model.AssistantCommand {
         val client = GeminiClient { "test-key" }
