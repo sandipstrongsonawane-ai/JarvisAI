@@ -107,13 +107,13 @@ class SettingsManager(context: Context) {
 
     // Background wake-word listening (must stay INSIDE the class)
     
-    /** On-device / wake-word master switch (OpenWakeWord / Porcupine). */
+    /** On-device wake-word master switch (Voicute only). */
     fun getWakeWordEnabled(): Boolean = prefs.getBoolean("wake_word", true)
     fun setWakeWordEnabled(v: Boolean) = prefs.edit().putBoolean("wake_word", v).apply()
 
     fun getBackgroundListen(): Boolean = prefs.getBoolean("background_listen", true)
     
-    /** Google STT continuous "hey jarvis" — higher battery; off by default. */
+    /** Legacy preference retained for migration; continuous Google STT wake is disabled. */
     fun getSttContinuousWake(): Boolean = prefs.getBoolean("stt_continuous_wake", true)
     fun setSttContinuousWake(enabled: Boolean) =
         prefs.edit().putBoolean("stt_continuous_wake", enabled).apply()
