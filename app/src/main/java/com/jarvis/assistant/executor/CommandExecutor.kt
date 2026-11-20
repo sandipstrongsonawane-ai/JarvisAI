@@ -581,7 +581,9 @@ class CommandExecutor(private val context: Context) {
     private fun callContact(name: String?): String {
         if (name.isNullOrBlank()) return "Whom shall I call, sir?"
         val number = resolvePhoneNumber(name) ?: return "I couldn't locate a number for $name, sir."
-        val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")).apply {
+        val dialable = number.filter { it.isDigit() || it == '+' }
+        if (dialable.count { it.isDigit() } < 8) return "Number for $name looks invalid, sir."
+        val intent = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", dialable, null)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
@@ -592,7 +594,9 @@ class CommandExecutor(private val context: Context) {
     private fun sendSms(name: String?, message: String?): String {
         if (name.isNullOrBlank() || message.isNullOrBlank()) return "I need both a recipient and a message, sir."
         val number = resolvePhoneNumber(name) ?: return "I couldn't locate a number for $name, sir."
-        SmsManager.getDefault().sendTextMessage(number, null, message, null, null)
+        val smsNumber = number.filter { it.isDigit() || it == '+' }
+        if (smsNumber.count { it.isDigit() } < 8) return "Number for $name looks invalid, sir."
+        SmsManager.getDefault().sendTextMessage(smsNumber, null, message, null, null)
         return "Message sent to $name, sir."
     }
 
