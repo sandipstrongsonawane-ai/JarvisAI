@@ -9,7 +9,10 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Build
+import android.net.Uri
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.widget.Button
 import android.widget.EditText
@@ -24,6 +27,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.jarvis.assistant.R
+import com.jarvis.assistant.ai.GeminiClient
+import com.jarvis.assistant.ai.JarvisLlmClient
 import com.jarvis.assistant.util.PersistentMemory
 import com.jarvis.assistant.util.SettingsManager
 import com.jarvis.assistant.voice.TextToSpeechHelper
@@ -44,7 +49,6 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var voiceAuthStatus: TextView
     private val voiceChipRefs = mutableMapOf<String, LinearLayout>()
     private val scope = CoroutineScope(Dispatchers.Main)
-
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) runEnrollment() else toast("Microphone permission is needed to enroll your voice.") }
@@ -257,8 +261,27 @@ class SettingsActivity : AppCompatActivity() {
             })
         })
 
-        // Voice Type selector removed — only male/JARVIS voice is used
-        settings.setVoiceType("male")
+        root.addView(sectionCard {
+            addView(sectionTitle("Puppy Companion"))
+            addView(bodyText("Enable the movable puppy overlay. Android asks for a separate display-over-other-apps permission."))
+            addView(hudButton("ENABLE PUPPY OVERLAY") {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this@SettingsActivity)) {
+                    try {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                        toast("Could not open overlay permission settings.")
+                    }
+                } else {
+                    com.jarvis.assistant.ui.PuppyOverlay.show(applicationContext)
+                    toast("Puppy companion enabled.")
+                }
+            })
+        })
 
         root.addView(sectionCard {
             addView(sectionTitle("Voice Speed"))
@@ -290,6 +313,82 @@ class SettingsActivity : AppCompatActivity() {
                 if (name.isNotBlank()) { settings.setUserName(name); toast("Saved.") }
             })
         })
+        
+        root.addView(sectionCard {
+            addView(sectionTitle("Cloud AI & Voice API Keys"))
+            addView(bodyText("Keys are encrypted on this phone and are not embedded in the APK. Groq is tried first; Gemini is the fallback."))
+            val groqInput = hudEditText(settings.getGroqApiKey()).apply {
+                hint = "Groq API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            val geminiInput = hudEditText(settings.getGeminiApiKey()).apply {
+                hint = "Gemini API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            val elevenLabsInput = hudEditText(settings.getElevenLabsApiKey()).apply {
+                hint = "ElevenLabs API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            val elevenLabsVoiceIdInput = hudEditText(settings.getElevenLabsVoiceId()).apply {
+                hint = "ElevenLabs female voice ID"
+                setSingleLine(true)
+            }
+            val weatherInput = hudEditText(settings.getOpenWeatherApiKey()).apply {
+                hint = "OpenWeather API key"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+            }
+            addView(bodyText("GROQ"))
+            addView(groqInput)
+            addView(bodyText("GEMINI"))
+            addView(geminiInput)
+            addView(bodyText("ELEVENLABS — FEMALE VOICE API KEY"))
+            addView(elevenLabsInput)
+            addView(bodyText("ELEVENLABS VOICE ID"))
+            addView(elevenLabsVoiceIdInput)
+            addView(bodyText("OPENWEATHER"))
+            addView(weatherInput)
+            var keysVisible = false
+            addView(hudButton("SHOW / HIDE KEYS") {
+                keysVisible = !keysVisible
+                val type = InputType.TYPE_CLASS_TEXT or if (keysVisible) {
+                    InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                } else {
+                    InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                groqInput.inputType = type
+                geminiInput.inputType = type
+                elevenLabsInput.inputType = type
+                weatherInput.inputType = type
+                groqInput.setSelection(groqInput.text.length)
+                geminiInput.setSelection(geminiInput.text.length)
+                elevenLabsInput.setSelection(elevenLabsInput.text.length)
+                weatherInput.setSelection(weatherInput.text.length)
+            })
+            addView(hudButton("SAVE API KEYS", filled = true) {
+                val voiceId = elevenLabsVoiceIdInput.text.toString().trim()
+                if (!voiceId.matches(Regex("^[A-Za-z0-9_-]{8,64}$"))) {
+                    toast("Invalid ElevenLabs voice ID. No API keys were changed.")
+                } else {
+                    // Validate every field before writing any provider setting.
+                    settings.setGroqApiKey(groqInput.text.toString().trim())
+                    settings.setGeminiApiKey(geminiInput.text.toString().trim())
+                    settings.setElevenLabsApiKey(elevenLabsInput.text.toString().trim())
+                    settings.setElevenLabsVoiceId(voiceId)
+                    settings.setOpenWeatherApiKey(weatherInput.text.toString().trim())
+                    toast("API keys and voice ID saved securely on this phone.")
+                }
+            })
+            addView(hudButton("TEST GROQ CONNECTION") {
+                testCloudKey("Groq", groqInput.text.toString().trim())
+            })
+            addView(hudButton("TEST GEMINI CONNECTION") {
+                testCloudKey("Gemini", geminiInput.text.toString().trim())
+            })
+        })
 
         root.addView(sectionCard {
             addView(sectionTitle("Remembered Note"))
@@ -304,9 +403,10 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(sectionCard {
             addView(sectionTitle("Voice Authentication", R.drawable.ic_mic))
             addView(bodyText(
-                "Approximate on-device voice matching — not a bank-grade biometric, but good " +
-                "enough to reject an obviously different voice. Checked once per app session, " +
-                "not on every command."
+                "Offline neural speaker verification (CAM++). When Voice Lock is ON, Jarvis " +
+                "checks the speaker before every spoken command. Typed chat is not voice-verified. " +
+                "The random spoken phrase is only a basic replay deterrent; it cannot guarantee " +
+                "liveness or stop live relays and generated-voice attacks. This is not bank-grade security."
             ))
             voiceAuthStatus = bodyText(voiceAuthStatusText())
             addView(voiceAuthStatus)
@@ -425,6 +525,42 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun testCloudKey(provider: String, key: String) {
+        if (key.isBlank()) {
+            toast("Enter the $provider API key first.")
+            return
+        }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    if (provider == "Groq") {
+                        val response = JarvisLlmClient(apiKeyProvider = { key }).chat("Reply with only the word OK.")
+                        if (response.ok) {
+                            "Groq generation successful."
+                        } else {
+                            "Groq generation failed: ${response.error.orEmpty().take(180)}"
+                        }
+                    } else {
+                        val response = GeminiClient(apiKeyProvider = { key })
+                            .getCommand("Reply with only the word OK.")
+                        val detail = response.message.orEmpty()
+                        if (detail.startsWith("Gemini API error") ||
+                            detail.startsWith("Gemini API key missing") ||
+                            detail.contains("available models abhi busy", ignoreCase = true)
+                        ) {
+                            "Gemini generation failed: ${detail.take(180)}"
+                        } else {
+                            "Gemini generation successful."
+                        }
+                    }
+                } catch (e: Exception) {
+                    "$provider test failed: ${e.message.orEmpty().take(160)}"
+                }
+            }
+            toast(result)
+        }
+    }
+
     private fun voiceAuthStatusText(): String = when {
         !voiceAuth.isEnrolled() -> "Not enrolled yet."
         voiceAuth.isEnabled() -> "Enrolled — voice lock is ON."
@@ -432,22 +568,45 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Enrolling — say a short phrase 3 times when prompted.")
+        toast("Voice enrollment starting. Background wake word remains enabled. Say the exact same phrase for all three samples.")
         scope.launch {
             val samples = mutableListOf<ShortArray>()
-            repeat(3) { i ->
-                toast("Sample ${i + 1} of 3 — speak now…")
-                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(1800) }
-                if (sample != null) samples.add(sample)
-            }
-            if (samples.size < 2) {
-                toast("Didn't capture enough audio — try again somewhere quieter.")
-                return@launch
-            }
-            voiceAuth.enrollFromSamples(samples)
-            voiceAuth.setEnabled(true)
-            voiceAuthStatus.text = voiceAuthStatusText()
-            toast("Voice enrolled and voice lock enabled.")
+                val enrollmentPhrase = "Meri awaaz pehchano"
+                val prompts = listOf(
+                    "First sample. Say: $enrollmentPhrase",
+                    "Second sample. Repeat exactly: $enrollmentPhrase",
+                    "Final sample. Repeat exactly: $enrollmentPhrase"
+                )
+                for (i in prompts.indices) {
+                    tts.speak(prompts[i])
+                    val promptFinished = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                        while (tts.isSpeaking()) kotlinx.coroutines.delay(100L)
+                        true
+                    } ?: false
+                    if (!promptFinished) {
+                        tts.stop()
+                        toast("Voice prompt did not finish. Please retry enrollment.")
+                        return@launch
+                    }
+                    val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(5000) }
+                    if (sample == null) {
+                        toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
+                        tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
+                        return@launch
+                    }
+                    samples += sample
+                    kotlinx.coroutines.delay(500L)
+                }
+                val enrolled = voiceAuth.enrollFromSamples(samples)
+                if (!enrolled) {
+                    toast(voiceAuth.lastEnrollmentFailureReason() ?: "Voice samples did not match reliably. Keep the phone 15–20 cm away and repeat the exact phrase.")
+                    tts.speak("Voice enrollment failed. Please try again.")
+                    return@launch
+                }
+                voiceAuth.setEnabled(true)
+                voiceAuthStatus.text = voiceAuthStatusText()
+                toast("Neural voice enrolled and voice lock enabled.")
+                tts.speak("Voice enrollment complete. Voice lock is now enabled.")
         }
     }
 

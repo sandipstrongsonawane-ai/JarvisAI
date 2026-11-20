@@ -23,10 +23,13 @@ class MultiStepExecutor(
 
     fun execute(
         steps: List<AssistantCommand>,
-        paceMs: Long = 700L
+        paceMs: Long = 0L
     ): Report {
         if (steps.isEmpty()) {
             return Report(false, "No steps to execute.", emptyList())
+        }
+        if (steps.size > MAX_STEPS) {
+            return Report(false, "Sequence has ${steps.size} steps; the maximum is $MAX_STEPS.", emptyList())
         }
         val results = mutableListOf<String>()
         val total = steps.size
@@ -84,17 +87,24 @@ class MultiStepExecutor(
         val s = speech.trim()
         val lower = s.lowercase()
 
-        // open X and send/message Y
+        // WhatsApp message chains require both a recipient and message body.
+        // Never report "message ready" for a REPLY action: that does not send anything.
         Regex(
-            """open\s+(.+?)\s+and\s+(?:send|message|text)\s+(.+)""",
+            """open\s+whatsapp\s+and\s+(?:send|message|text)\s+(.+?)\s+to\s+(.+)""",
             RegexOption.IGNORE_CASE
         ).find(s)?.let { m ->
-            val app = m.groupValues[1].trim()
-            val msg = m.groupValues[2].trim()
-            return listOf(
-                AssistantCommand(action = ActionType.OPEN_APP.key, target = app),
-                AssistantCommand(action = ActionType.REPLY.key, message = "Opened $app. Message ready: $msg")
-            )
+            val message = m.groupValues[1].trim()
+            val recipient = m.groupValues[2].trim()
+            if (message.isNotBlank() && recipient.isNotBlank()) {
+                return listOf(
+                    AssistantCommand(action = ActionType.OPEN_APP.key, target = "WhatsApp"),
+                    AssistantCommand(
+                        action = ActionType.WHATSAPP_MESSAGE.key,
+                        target = recipient,
+                        message = message
+                    )
+                )
+            }
         }
 
         // open X then / and open Y
@@ -105,6 +115,30 @@ class MultiStepExecutor(
             return listOf(
                 AssistantCommand(action = ActionType.OPEN_APP.key, target = m.groupValues[1].trim()),
                 AssistantCommand(action = ActionType.OPEN_APP.key, target = m.groupValues[2].trim())
+            )
+        }
+
+        // Explicit torch state followed by opening another app.
+        Regex(
+            """(?:turn\s+)?(?:the\s+)?(?:torch|flashlight)\s+(on|off)\s+(?:and then|and|phir|then)\s+open\s+(.+)""",
+            RegexOption.IGNORE_CASE
+        ).find(s)?.let { match ->
+            val state = if (match.groupValues[1].equals("on", true)) "torch_on" else "torch_off"
+            return listOf(
+                AssistantCommand(action = ActionType.TOGGLE_SETTING.key, target = state),
+                AssistantCommand(action = ActionType.OPEN_APP.key, target = match.groupValues[2].trim())
+            )
+        }
+
+        // Open an app first, then set the torch explicitly.
+        Regex(
+            """open\s+(.+?)\s+(?:and then|and|phir|then)\s+(?:turn\s+)?(?:the\s+)?(?:torch|flashlight)\s+(on|off)""",
+            RegexOption.IGNORE_CASE
+        ).find(s)?.let { match ->
+            val state = if (match.groupValues[2].equals("on", true)) "torch_on" else "torch_off"
+            return listOf(
+                AssistantCommand(action = ActionType.OPEN_APP.key, target = match.groupValues[1].trim()),
+                AssistantCommand(action = ActionType.TOGGLE_SETTING.key, target = state)
             )
         }
 
@@ -127,14 +161,16 @@ class MultiStepExecutor(
     private fun isHardFail(out: String): Boolean {
         val l = out.lowercase()
         val keys = listOf(
-            "couldn't", "could not", "failed", "unable", "not found",
-            "permission", "i didn't understand", "unknown", "error",
-            "which application", "which app"
+            "couldn't", "could not", "can't", "cannot", "failed", "unable", "not found",
+            "not installed", "doesn't appear", "does not appear", "no compatible app",
+            "permission", "denied", "i didn't understand", "unknown", "unknown setting", "error",
+            "which application", "which app", "no number"
         )
         return keys.any { l.contains(it) }
     }
 
     companion object {
         private const val TAG = "MultiStepExecutor"
+        const val MAX_STEPS = 5
     }
 }

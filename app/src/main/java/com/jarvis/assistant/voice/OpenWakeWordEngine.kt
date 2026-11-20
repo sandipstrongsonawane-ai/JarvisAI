@@ -10,17 +10,28 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 class OpenWakeWordEngine(private val context: Context) {
 
     private var engine: WakeWordEngine? = null
     private var collectJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Volatile private var stopping = false
 
-    fun start(onWake: () -> Unit): Boolean {
+    fun start(onWake: () -> Unit, onFailure: (Throwable) -> Unit = {}): Boolean {
         return try {
             stop()
+            stopping = false
+            val failureReported = AtomicBoolean(false)
+            fun reportFailure(error: Throwable) {
+                if (!stopping && failureReported.compareAndSet(false, true)) {
+                    Log.e(TAG, "wake audio/detection stream failed", error)
+                    onFailure(error)
+                }
+            }
             val models = listOf(
                 WakeWordModel(
                     name = "Hey Jarvis",
@@ -38,7 +49,13 @@ class OpenWakeWordEngine(private val context: Context) {
             eng.start()
             collectJob = scope.launch {
                 eng.detections
-                    .catch { e -> Log.e(TAG, "detections error", e) }
+                    .catch { e -> reportFailure(e) }
+                    .onCompletion { cause ->
+                        if (cause != null) reportFailure(cause)
+                        else if (!stopping) reportFailure(
+                            IllegalStateException("Wake detection stream completed unexpectedly")
+                        )
+                    }
                     .collect { det ->
                         Log.i(TAG, "wake detected: " + det.model.name + " score=" + det.score)
                         onWake()
@@ -46,13 +63,14 @@ class OpenWakeWordEngine(private val context: Context) {
             }
             Log.i(TAG, "started — say Hey Jarvis")
             true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "start failed: " + e.message, e)
             false
         }
     }
 
     fun stop() {
+        stopping = true
         try { collectJob?.cancel() } catch (_: Exception) {}
         collectJob = null
         try { engine?.stop() } catch (_: Exception) {}

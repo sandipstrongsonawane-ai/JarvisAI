@@ -45,6 +45,37 @@ class OfflineBrain(
         // Add to conversation history
         conversationContext.addMessage(text, isUserInput = true)
 
+        // A request to open navigation without a destination should open Maps, not route to the word "kholo".
+        if (containsAny(cmd, "open navigation", "navigation kholo", "start navigation", "maps navigation")) {
+            return executor.execute(AssistantCommand("open_app", "Maps"))
+        }
+
+        // Destination-based navigation must be a real route action, not just opening Maps.
+        val navigationDestination = sequenceOf(
+            Regex("""^(?:please\s+)?(?:navigate|navigation|directions?|route)\s+(?:(?:me|us)\s+)?(?:to|for)\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^navigate\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(?:take me|drive me|guide me)\s+(?:to)?\s*(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^mujhe\s+(.+?)\s+(?:tak\s+)?(?:le chalo|le jao|ka rasta batao|ka navigation karo)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(.+?)\s+(?:ka|ke liye)\s+(?:rasta|raasta|navigation|directions?)\s*(?:batao|dikhao|chalu karo)?$""", RegexOption.IGNORE_CASE)
+        ).mapNotNull { it.find(cmd)?.groupValues?.getOrNull(1)?.trim() }
+            .firstOrNull { it.isNotBlank() }
+        if (navigationDestination != null) {
+            return executor.execute(
+                AssistantCommand("navigate", navigationDestination, "driving")
+            )
+        }
+
+        // Route supported deterministic chains through the same multi-step executor.
+        // This includes WhatsApp message chains; the executor's risk gate asks for confirmation.
+        val offlineSteps = com.jarvis.assistant.executor.MultiStepExecutor(context) { step ->
+            executor.execute(step)
+        }.parseOfflineChain(text)
+        if (!offlineSteps.isNullOrEmpty()) {
+            return executor.execute(
+                com.jarvis.assistant.model.AssistantCommand("multi_step", steps = offlineSteps)
+            )
+        }
+
         if (containsAny(cmd, "who is this", "identify person", "identify face", "who is that", "chehra pehchano")) {
             return try {
                 val i = android.content.Intent(context, com.jarvis.assistant.vision.VisionActivity::class.java)
@@ -1047,7 +1078,7 @@ class OfflineBrain(
         containsAny(cmd, "open camera", "camera kholo", "camera on karo") -> AssistantCommand("open_app", "Camera")
         containsAny(cmd, "open gallery", "open photos", "gallery kholo") -> AssistantCommand("open_app", "Gallery")
         containsAny(cmd, "open chrome", "open browser", "browser kholo") -> AssistantCommand("open_app", "Chrome")
-        containsAny(cmd, "open youtube", "youtube kholo") -> AssistantCommand("open_app", "YouTube")
+        containsAny(cmd, "open youtube", "youtube kholo", "youtube khol", "youtube open", "youtube open karo", "youtube chalu karo") -> AssistantCommand("open_app", "YouTube")
         containsAny(cmd, "open whatsapp business", "whatsapp business kholo", "wa business", "business whatsapp") -> AssistantCommand("open_app", "WhatsApp Business")
         containsAny(cmd, "open whatsapp", "whatsapp kholo") -> AssistantCommand("open_app", "WhatsApp")
         containsAny(cmd, "open telegram", "telegram kholo") -> AssistantCommand("open_app", "Telegram")
@@ -1085,24 +1116,15 @@ class OfflineBrain(
         containsAny(cmd, "stop music", "gaana band karo") ->
             AssistantCommand("media_control", "stop")
         containsAny(cmd, "play on spotify", "spotify pe", "spotify par") -> {
-            val q = original
-                .replace(Regex("(?i)play on spotify|spotify pe|spotify par|on spotify"), "")
-                .replace(Regex("(?i)\b(play|chalao|chala|karo)\b"), "")
-                .trim()
+            val q = extractMediaSearchQuery(original)
             AssistantCommand("play_media", q.ifBlank { null }, "spotify")
         }
         containsAny(cmd, "play on youtube music", "youtube music pe", "yt music") -> {
-            val q = original
-                .replace(Regex("(?i)play on youtube music|youtube music pe|yt music|on youtube music"), "")
-                .replace(Regex("(?i)\b(play|chalao|chala|karo)\b"), "")
-                .trim()
+            val q = extractMediaSearchQuery(original)
             AssistantCommand("play_media", q.ifBlank { null }, "youtube music")
         }
-        containsAny(cmd, "play on youtube", "youtube pe", "youtube par") -> {
-            val q = original
-                .replace(Regex("(?i)play on youtube|youtube pe|youtube par|on youtube"), "")
-                .replace(Regex("(?i)\b(chalao|chala|karo|play)\b"), "")
-                .trim()
+        containsAny(cmd, "play on youtube", "youtube pe", "youtube par", "youtube par chalao") -> {
+            val q = extractMediaSearchQuery(original)
             AssistantCommand("play_media", q.ifBlank { null }, "youtube")
         }
         containsAny(cmd, "play music", "play song", "gaana chalao", "gana chalao") ||
@@ -1294,6 +1316,25 @@ class OfflineBrain(
 
         else -> null
         }
+    }
+
+    private fun extractMediaSearchQuery(original: String): String {
+        var query = original.trim()
+        query = query.replace(
+            Regex("""(?i)^\s*(?:please\s+)?(?:play|lagao|laga do|chalao|chala do|chala|start)\s+"""),
+            ""
+        )
+        query = query.replace(
+            Regex("""(?i)^(?:on\s+)?(?:youtube music|yt music|youtube|spotify)\s*(?:par|pe)?\s+"""),
+            ""
+        )
+        query = query.replace(Regex("""(?i)^\s*(?:song|music|gaana|gana)\s+"""), "")
+        query = query.replace(
+            Regex("""(?i)\s*(?:on\s+)?(?:youtube music|yt music|youtube|spotify)\s*(?:par|pe)?\s*(?:chalao|chala do|laga do)?\s*$"""),
+            ""
+        )
+        query = query.replace(Regex("""(?i)\s+(?:laga do|lagao|chalao|chala do)$"""), "")
+        return query.trim()
     }
 
     /**

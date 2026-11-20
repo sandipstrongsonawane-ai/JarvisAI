@@ -3,8 +3,9 @@ package com.jarvis.assistant.voice
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import com.jarvis.assistant.BuildConfig
 import com.jarvis.assistant.util.SettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,41 +16,39 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Cloud TTS via ElevenLabs — natural / cinematic Jarvis-style voice.
+ * Cloud TTS via ElevenLabs — natural female voice for Jarvis.
  *
- * Free tier: https://elevenlabs.io → API key in local.properties as ELEVENLABS_API_KEY
- * Optional: ELEVENLABS_VOICE_ID (dashboard → Voices → copy ID)
+ * Add the ElevenLabs API key in Jarvis Settings; it is stored with Android Keystore encryption.
+ * Voice ID can be changed in Jarvis Settings → Cloud AI & Voice API Keys.
  *
- * Default voice is a deep male stock voice suitable for JARVIS tone.
+ * The selected female voice is the default. An explicit custom voice ID can override it.
  */
 class ElevenLabsTtsClient(private val context: Context) {
 
+    private val settings = SettingsManager(context.applicationContext)
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .build()
 
     private var player: MediaPlayer? = null
+    private val activeCall = AtomicReference<okhttp3.Call?>(null)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val requestGeneration = AtomicLong(0L)
 
     val isConfigured: Boolean
-        get() = BuildConfig.ELEVENLABS_API_KEY.trim().isNotEmpty()
+        get() = settings.getElevenLabsApiKey().isNotBlank()
 
     private val apiKey: String
-        get() = BuildConfig.ELEVENLABS_API_KEY.trim()
+        get() = settings.getElevenLabsApiKey().trim()
 
-    private val settings = SettingsManager(context)
-
-    /** Female preference always uses a distinct known-good voice; male keeps
-     *  any custom BuildConfig override (from local.properties / CI secret),
-     *  falling back to the stock male voice if none was set. */
+    /** Always use the exact female voice ID selected by the user. */
     private val voiceId: String
-        get() {
-            // Female voice disabled — always use male/JARVIS voice
-            val override = BuildConfig.ELEVENLABS_VOICE_ID.trim()
-            return if (override.isNotEmpty()) override else DEFAULT_VOICE_ID
-        }
+        get() = settings.getElevenLabsVoiceId()
 
     /**
      * Synthesize [text] and play. Returns true if audio started successfully.
@@ -57,6 +56,8 @@ class ElevenLabsTtsClient(private val context: Context) {
      */
     suspend fun speak(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isConfigured || text.isBlank()) return@withContext false
+        stop()
+        val generation = requestGeneration.get()
         val cleaned = text
             .replace("...", ", ")
             .replace(" — ", ", ")
@@ -66,6 +67,7 @@ class ElevenLabsTtsClient(private val context: Context) {
         // Free tier: keep requests short
         val clipped = if (cleaned.length > 2500) cleaned.take(2500) else cleaned
 
+        var requestCall: okhttp3.Call? = null
         try {
             val bodyJson = JSONObject().apply {
                 put("text", clipped)
@@ -85,7 +87,16 @@ class ElevenLabsTtsClient(private val context: Context) {
                 .post(bodyJson.toString().toRequestBody(JSON_MEDIA))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val call = client.newCall(request)
+            requestCall = call
+            activeCall.set(call)
+            if (requestGeneration.get() != generation) {
+                activeCall.compareAndSet(call, null)
+                call.cancel()
+                return@withContext false
+            }
+            call.execute().use { response ->
+                if (call.isCanceled() || requestGeneration.get() != generation) return@withContext false
                 if (!response.isSuccessful) {
                     val err = response.body?.string()?.take(200) ?: ""
                     Log.e(TAG, "ElevenLabs HTTP ${response.code}: $err")
@@ -94,65 +105,78 @@ class ElevenLabsTtsClient(private val context: Context) {
                 val bytes = response.body?.bytes() ?: return@withContext false
                 if (bytes.isEmpty()) return@withContext false
 
+                if (call.isCanceled() || requestGeneration.get() != generation) {
+                    activeCall.compareAndSet(call, null)
+                    return@withContext false
+                }
+                activeCall.compareAndSet(call, null)
                 val cache = File(context.cacheDir, "jarvis_tts_el.mp3")
                 cache.writeBytes(bytes)
 
                 withContext(Dispatchers.Main) {
-                    playFile(cache)
+                    if (requestGeneration.get() == generation) playFile(cache) else false
                 }
-                true
             }
         } catch (e: Exception) {
             Log.e(TAG, "ElevenLabs speak failed: ${e.message}", e)
             false
+        } finally {
+            requestCall?.let { activeCall.compareAndSet(it, null) }
         }
     }
 
-    private fun playFile(file: File) {
-        stop()
-        try {
-            player = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                setDataSource(file.absolutePath)
-                setOnCompletionListener {
-                    try {
-                        it.release()
-                    } catch (_: Exception) {
-                    }
-                    if (player === it) player = null
-                }
-                setOnErrorListener { mp, _, _ ->
-                    try {
-                        mp.release()
-                    } catch (_: Exception) {
-                    }
-                    if (player === mp) player = null
-                    true
-                }
-                prepare()
-                start()
+    private fun playFile(file: File): Boolean {
+        val newPlayer = MediaPlayer()
+        return try {
+            player = newPlayer
+            newPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            newPlayer.setDataSource(file.absolutePath)
+            newPlayer.setOnCompletionListener {
+                try { it.release() } catch (_: Exception) {}
+                if (player === it) player = null
             }
+            newPlayer.setOnErrorListener { mp, _, _ ->
+                try { mp.release() } catch (_: Exception) {}
+                if (player === mp) player = null
+                true
+            }
+            newPlayer.prepare()
+            newPlayer.start()
+            newPlayer.isPlaying
         } catch (e: Exception) {
-            Log.e(TAG, "MediaPlayer failed: ${e.message}")
-            player = null
+            Log.e(TAG, "MediaPlayer failed: ${e.message}", e)
+            if (player === newPlayer) player = null
+            try { newPlayer.reset() } catch (_: Exception) {}
+            try { newPlayer.release() } catch (_: Exception) {}
+            false
         }
+    }
+
+    fun isPlaying(): Boolean = try {
+        player?.isPlaying == true
+    } catch (_: Exception) {
+        false
     }
 
     fun stop() {
-        try {
-            player?.stop()
-        } catch (_: Exception) {
-        }
-        try {
-            player?.release()
-        } catch (_: Exception) {
-        }
+        requestGeneration.incrementAndGet()
+        activeCall.getAndSet(null)?.cancel()
+        // MediaPlayer is created and played on main; stop/release it there too.
+        val cleanup = Runnable { releasePlayer() }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run()
+        else mainHandler.post(cleanup)
+    }
+
+    private fun releasePlayer() {
+        val current = player ?: return
         player = null
+        try { current.stop() } catch (_: Exception) {}
+        try { current.release() } catch (_: Exception) {}
     }
 
     companion object {
@@ -160,9 +184,9 @@ class ElevenLabsTtsClient(private val context: Context) {
         private const val BASE_URL = "https://api.elevenlabs.io/v1"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
-        /** Deep male stock voice (Adam) — override with ELEVENLABS_VOICE_ID */
+        /** Original selected female voice supplied by the user. */
+        const val FEMALE_VOICE_ID = "RABOvaPec1ymXz02oDQi"
+        /** Legacy stock male voice ID retained for compatibility only. */
         const val DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
-        /** Well-known ElevenLabs premade female voice (Rachel) */
-        const val FEMALE_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
     }
 }

@@ -7,227 +7,305 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import androidx.core.content.ContextCompat
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.ln
-import kotlin.math.log10
-import kotlin.math.pow
-import kotlin.math.sin
+import com.jarvis.assistant.util.SecureApiKeyStore
+import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
+import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 
 /**
- * "Only my voice can use Jarvis" — Phase 5 style feature. This is a lightweight,
- * dependency-free speaker verification: it captures a short audio sample, turns it into
- * an averaged log-mel-filterbank "voiceprint" (a much simpler cousin of what real speaker
- * embedding models compute), and compares new samples against the enrolled one with
- * cosine similarity.
- *
- * Honest limits: this is NOT a trained neural speaker-ID model (those need a pretrained
- * embedding network this environment can't produce or download). It's good enough to
- * reject a clearly different voice for a personal single-user assistant — it is not
- * hardened against someone deliberately trying to mimic your voice or replay a recording.
- *
- * All computation and storage is on-device; no audio ever leaves the phone.
+ * Offline neural speaker verification backed by sherpa-onnx 3D-Speaker CAM++.
+ * Audio and embeddings stay on-device. The random spoken challenge is a basic
+ * replay deterrent, not a guarantee against live relay or high-quality synthesis.
  */
 class VoiceAuthManager(private val context: Context) {
-
     private val prefs = context.getSharedPreferences("jarvis_voice_auth", Context.MODE_PRIVATE)
+    private val secureStore = SecureApiKeyStore(context)
     private val sampleRate = 16000
-    private val frameSize = 512   // power of 2, required by the FFT below (~32ms @ 16kHz)
-    private val hopSize = 256     // 50% overlap between frames
-    private val melBands = 20
+    private val modelName = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+    // CAM++ cosine scores vary with mic distance and room noise; keep majority voting
+    // across three samples while avoiding an overly strict single fixed threshold.
+    private val enrollmentThreshold = 0.45f
+    private val verificationThreshold = 0.50f
+    @Volatile private var lastEnrollmentFailure: String? = null
+    @Volatile private var lastEmbeddingFailure: String? = null
+
+    fun lastEnrollmentFailureReason(): String? = lastEnrollmentFailure
 
     fun isEnabled(): Boolean = prefs.getBoolean("enabled", false)
     fun setEnabled(enabled: Boolean) = prefs.edit().putBoolean("enabled", enabled).apply()
-    fun isEnrolled(): Boolean = prefs.contains("voiceprint")
+    fun isEnrolled(): Boolean = readEmbeddings() != null
 
     fun resetEnrollment() {
-        prefs.edit().remove("voiceprint").putBoolean("enabled", false).apply()
+        try { secureStore.put("voice_embedding", "") } catch (e: Exception) {
+            android.util.Log.w("JarvisVoiceAuth", "Could not clear encrypted voice template: ${e.message}")
+        }
+        prefs.edit().remove("voice_embedding").remove("voiceprint").putBoolean("enabled", false).apply()
     }
 
-    /**
-     * Blocking — always call from a background thread (e.g. Dispatchers.IO).
-     * Records [durationMs] of mono 16-bit PCM audio. Returns null on missing permission,
-     * a device that refuses to initialize the recorder, or too little audio captured.
-     */
-    fun captureSample(durationMs: Int = 1500): ShortArray? {
+    fun captureSample(durationMs: Int = 2200): ShortArray? {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) return null
-
-        val minBuf = AudioRecord.getMinBufferSize(
+        val minBuffer = AudioRecord.getMinBufferSize(
             sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
-        if (minBuf <= 0) return null
-
+        if (minBuffer <= 0) return null
         val recorder = try {
             AudioRecord(
-                MediaRecorder.AudioSource.MIC, sampleRate,
-                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2
+                MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer * 2, sampleRate)
             )
-        } catch (e: SecurityException) {
+        } catch (_: Exception) {
             return null
         }
-
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()
             return null
         }
-
-        val totalSamples = (sampleRate.toLong() * durationMs / 1000).toInt()
-        val buffer = ShortArray(totalSamples)
-        var read = 0
-
+        val required = (sampleRate.toLong() * durationMs / 1000L).toInt()
+        val output = ShortArray(required)
+        var offset = 0
+        var started = false
         try {
             recorder.startRecording()
-            while (read < totalSamples) {
-                val n = recorder.read(buffer, read, totalSamples - read)
-                if (n <= 0) break
-                read += n
+            started = true
+            while (offset < required) {
+                val count = recorder.read(output, offset, required - offset)
+                if (count <= 0) break
+                offset += count
             }
+        } catch (_: Exception) {
+            return null
         } finally {
-            recorder.stop()
+            try { if (started) recorder.stop() } catch (_: Exception) {}
             recorder.release()
         }
-
-        // Need at least ~0.4s of audio for a usable feature vector.
-        return if (read > sampleRate * 4 / 10) buffer.copyOf(read) else null
-    }
-
-    /** Averages [samplesList]'s features into one stored voiceprint. */
-    fun enrollFromSamples(samplesList: List<ShortArray>): Boolean {
-        if (samplesList.isEmpty()) return false
-        val features = samplesList.map { extractFeatures(it) }
-        val avg = FloatArray(melBands)
-        for (f in features) for (i in 0 until melBands) avg[i] += f[i]
-        for (i in 0 until melBands) avg[i] = avg[i] / features.size.toFloat()
-
-        prefs.edit().putString("voiceprint", avg.joinToString(",")).apply()
-        return true
-    }
-
-    /** True if [samples] is close enough to the enrolled voiceprint (or nothing enrolled yet). */
-    fun verify(samples: ShortArray, threshold: Float = 0.75f): Boolean {
-        val stored = prefs.getString("voiceprint", null) ?: return true
-        val storedVec = stored.split(",").mapNotNull { it.toFloatOrNull() }.toFloatArray()
-        if (storedVec.size != melBands) return true // corrupted/legacy data — fail open
-        val candidate = extractFeatures(samples)
-        return cosineSimilarity(storedVec, candidate) >= threshold
-    }
-
-    private fun extractFeatures(samples: ShortArray): FloatArray {
-        val floatSamples = FloatArray(samples.size) { samples[it] / 32768f }
-        val melFilters = buildMelFilterbank()
-        val accum = FloatArray(melBands)
-        var frameCount = 0
-
-        var offset = 0
-        while (offset + frameSize <= floatSamples.size) {
-            val frame = FloatArray(frameSize)
-            for (i in 0 until frameSize) {
-                val w = 0.54f - 0.46f * cos(2 * PI * i / (frameSize - 1)).toFloat() // Hamming
-                frame[i] = floatSamples[offset + i] * w
-            }
-            val spectrum = magnitudeSpectrum(frame)
-            for (b in 0 until melBands) {
-                var energy = 0f
-                for (k in spectrum.indices) energy += spectrum[k] * melFilters[b][k]
-                accum[b] += ln(energy.coerceAtLeast(1e-8f))
-            }
-            frameCount++
-            offset += hopSize
+        if (offset < sampleRate * 12 / 10) return null
+        val captured = output.copyOf(offset)
+        var energy = 0.0
+        var peak = 0
+        captured.forEach {
+            val value = kotlin.math.abs(it.toInt())
+            if (value > peak) peak = value
+            val normalized = it / 32768.0
+            energy += normalized * normalized
         }
-
-        if (frameCount == 0) return FloatArray(melBands)
-        for (b in 0 until melBands) accum[b] = accum[b] / frameCount.toFloat()
-
-        // Mean-normalize so overall loudness/mic gain doesn't dominate the comparison.
-        val mean = accum.average().toFloat()
-        return FloatArray(melBands) { accum[it] - mean }
+        val rms = kotlin.math.sqrt(energy / captured.size).toFloat()
+        val accepted = rms >= 0.004f && peak >= 500
+        android.util.Log.i(
+            "JarvisVoiceAuth",
+            "capture durationMs=$durationMs samples=${captured.size} rms=$rms peak=$peak accepted=$accepted"
+        )
+        return if (accepted) captured else null
     }
 
-    private fun magnitudeSpectrum(frame: FloatArray): FloatArray {
-        val n = frame.size
-        val real = frame.copyOf()
-        val imag = FloatArray(n)
-        fft(real, imag)
-        val half = n / 2
-        return FloatArray(half) { sqrt(real[it] * real[it] + imag[it] * imag[it]) }
-    }
-
-    /** In-place iterative radix-2 Cooley-Tukey FFT. Requires size to be a power of 2. */
-    private fun fft(real: FloatArray, imag: FloatArray) {
-        val n = real.size
-        var j = 0
-        for (i in 1 until n) {
-            var bit = n shr 1
-            while (j and bit != 0) {
-                j = j xor bit
-                bit = bit shr 1
-            }
-            j = j or bit
-            if (i < j) {
-                var tmp = real[i]; real[i] = real[j]; real[j] = tmp
-                tmp = imag[i]; imag[i] = imag[j]; imag[j] = tmp
-            }
+    suspend fun enrollFromSamples(samples: List<ShortArray>): Boolean = withContext(Dispatchers.Default) {
+        // Settings enrollment records three independent utterances. Do not silently
+        // accept a partial enrollment or average embeddings from inconsistent speakers.
+        lastEnrollmentFailure = null
+        if (samples.size < 3) {
+            lastEnrollmentFailure = "Three separate voice samples are required."
+            return@withContext false
         }
-        var len = 2
-        while (len <= n) {
-            val ang = -2 * PI / len
-            val wr = cos(ang).toFloat()
-            val wi = sin(ang).toFloat()
-            var i = 0
-            while (i < n) {
-                var curWr = 1f
-                var curWi = 0f
-                for (k in 0 until len / 2) {
-                    val uR = real[i + k]; val uI = imag[i + k]
-                    val vR = real[i + k + len / 2] * curWr - imag[i + k + len / 2] * curWi
-                    val vI = real[i + k + len / 2] * curWi + imag[i + k + len / 2] * curWr
-                    real[i + k] = uR + vR; imag[i + k] = uI + vI
-                    real[i + k + len / 2] = uR - vR; imag[i + k + len / 2] = uI - vI
-                    val nWr = curWr * wr - curWi * wi
-                    val nWi = curWr * wi + curWi * wr
-                    curWr = nWr; curWi = nWi
+        if (samples.any { it.size < sampleRate * 12 / 10 }) {
+            lastEnrollmentFailure = "One or more samples were too short. Please repeat the enrollment."
+            return@withContext false
+        }
+        val vectors = samples.mapIndexed { index, sample ->
+            val vector = embedding(sample)
+            if (vector == null) {
+                android.util.Log.e("JarvisVoiceAuth", "Enrollment embedding failed for sample ${index + 1}")
+                lastEnrollmentFailure = lastEmbeddingFailure?.let { "Sample ${index + 1}: " + it }
+                    ?: "CAM++ could not create a voice embedding for sample ${index + 1}. Check microphone input and retry."
+                return@withContext false
+            }
+            vector
+        }
+        val dimension = vectors.first().size
+        if (dimension <= 0 || vectors.any { it.size != dimension }) {
+            lastEnrollmentFailure = "Voice model returned inconsistent sample data."
+            return@withContext false
+        }
+        for (i in vectors.indices) {
+            for (j in i + 1 until vectors.size) {
+                val similarity = cosineSimilarity(vectors[i], vectors[j])
+                android.util.Log.i("JarvisVoiceAuth", "Enrollment similarity sample ${i + 1}-${j + 1}=$similarity threshold=$enrollmentThreshold")
+                if (similarity < enrollmentThreshold) {
+                    lastEnrollmentFailure = "Samples differ too much (similarity $similarity). Keep the same distance and speak naturally for each sample."
+                    return@withContext false
                 }
-                i += len
             }
-            len = len shl 1
+        }
+        // Keep each independent enrollment sample. Verification uses majority
+        // agreement across these stored speaker embeddings instead of one average.
+        val encoded = SpeakerEmbeddingMatcher.encode(vectors, enrollmentThreshold)
+            ?: run {
+                lastEnrollmentFailure = "Could not build a stable voice profile from these samples."
+                return@withContext false
+            }
+        try {
+            secureStore.put("voice_embedding", encoded)
+            prefs.edit().remove("voice_embedding").remove("voiceprint").apply()
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisVoiceAuth", "Could not encrypt enrolled speaker template", e)
+            lastEnrollmentFailure = "Could not save the encrypted voice profile: " + (e.message ?: "storage error")
+            false
         }
     }
 
-    private fun buildMelFilterbank(): Array<FloatArray> {
-        val half = frameSize / 2
-        fun hzToMel(hz: Float) = 2595f * log10(1f + hz / 700f)
-        fun melToHz(mel: Float) = 700f * (10f.pow(mel / 2595f) - 1f)
+    suspend fun verify(samples: ShortArray): Boolean = withContext(Dispatchers.Default) {
+        if (samples.size < sampleRate * 12 / 10) return@withContext false
+        val enrolled = readEmbeddings() ?: return@withContext false
+        val candidate = embedding(samples) ?: return@withContext false
+        SpeakerEmbeddingMatcher.matches(enrolled, candidate, verificationThreshold)
+    }
 
-        val minMel = hzToMel(0f)
-        val maxMel = hzToMel(sampleRate / 2f)
-        val melPoints = FloatArray(melBands + 2) { minMel + (maxMel - minMel) * it / (melBands + 1) }
-        val hzPoints = melPoints.map { melToHz(it) }
-        val bin = hzPoints.map { (it * frameSize / sampleRate).toInt().coerceIn(0, half - 1) }
-
-        return Array(melBands) { b ->
-            val filter = FloatArray(half)
-            val left = bin[b]; val center = bin[b + 1]; val right = bin[b + 2]
-            for (k in left until center) {
-                if (center > left) filter[k] = (k - left).toFloat() / (center - left)
-            }
-            for (k in center until right) {
-                if (right > center) filter[k] = (right - k).toFloat() / (right - center)
-            }
-            filter
+    private fun readEmbeddings(): List<FloatArray>? {
+        secureStore.get("voice_embedding")?.let { encrypted ->
+            return SpeakerEmbeddingMatcher.decode(encrypted)
         }
+        // One-time migration for legacy plaintext speaker templates.
+        val legacy = prefs.getString("voice_embedding", null) ?: return null
+        return try {
+            secureStore.put("voice_embedding", legacy)
+            prefs.edit().remove("voice_embedding").apply()
+            SpeakerEmbeddingMatcher.decode(legacy)
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisVoiceAuth", "Could not encrypt legacy voice template", e)
+            null
+        }
+    }
+
+    private fun embedding(samples: ShortArray): FloatArray? {
+        lastEmbeddingFailure = null
+        val extractor = try {
+            getExtractor()
+        } catch (e: Throwable) {
+            lastEmbeddingFailure = "CAM++ model initialization failed (" + e.javaClass.simpleName + "): " + (e.message ?: "no detail")
+            android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty(), e)
+            return null
+        }
+        val stream = try {
+            extractor.createStream()
+        } catch (e: Throwable) {
+            lastEmbeddingFailure = "CAM++ stream creation failed (" + e.javaClass.simpleName + "): " + (e.message ?: "no detail")
+            android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty(), e)
+            return null
+        }
+        return try {
+            // Trim leading/trailing room silence before CAM++ embedding extraction.
+            // The same path is used for enrollment and verification.
+            val speech = trimSilence(samples)
+            if (speech.size < sampleRate * 12 / 10) {
+                lastEmbeddingFailure = "Captured speech is too short after silence trimming (" + (speech.size * 1000 / sampleRate) + " ms)."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                return null
+            }
+            val floats = FloatArray(speech.size) { speech[it] / 32768.0f }
+            stream.acceptWaveform(floats, sampleRate)
+            stream.inputFinished()
+            // sherpa-onnx requires IsReady before Compute; otherwise the native
+            // extractor may be asked to process insufficient feature frames.
+            if (!extractor.isReady(stream)) {
+                lastEmbeddingFailure = "CAM++ reports that this recording is too short or too quiet to produce speaker features. Keep speaking naturally for the full sample."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                return null
+            }
+            val vector = extractor.compute(stream)
+            if (vector.isEmpty()) {
+                lastEmbeddingFailure = "CAM++ returned an empty embedding. Audio was captured, but the model rejected this sample."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                null
+            } else if (vector.any { !it.isFinite() }) {
+                lastEmbeddingFailure = "CAM++ returned invalid numeric values for the captured sample."
+                android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                null
+            } else {
+                normalize(vector).also {
+                    if (it == null) {
+                        lastEmbeddingFailure = "CAM++ returned a zero-length speaker vector."
+                        android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty())
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            lastEmbeddingFailure = "CAM++ embedding failed (" + e.javaClass.simpleName + "): " + (e.message ?: "no detail")
+            android.util.Log.e("JarvisVoiceAuth", lastEmbeddingFailure.orEmpty(), e)
+            null
+        } finally {
+            try { stream.release() } catch (e: Exception) {
+                android.util.Log.w("JarvisVoiceAuth", "Could not release CAM++ stream", e)
+            }
+        }
+    }
+
+    private fun trimSilence(samples: ShortArray): ShortArray {
+        if (samples.size < sampleRate * 2) return samples
+        val frameSize = sampleRate / 50 // 20 ms
+        val frameRms = mutableListOf<Float>()
+        var maxRms = 0f
+        var offset = 0
+        while (offset < samples.size) {
+            val end = minOf(samples.size, offset + frameSize)
+            var energy = 0.0
+            for (i in offset until end) {
+                val value = samples[i] / 32768.0
+                energy += value * value
+            }
+            val rms = kotlin.math.sqrt(energy / (end - offset)).toFloat()
+            frameRms += rms
+            if (rms > maxRms) maxRms = rms
+            offset = end
+        }
+        val gate = maxOf(0.0035f, maxRms * 0.12f)
+        val first = frameRms.indexOfFirst { it >= gate }
+        val last = frameRms.indexOfLast { it >= gate }
+        if (first < 0 || last < first) return samples
+        val padding = sampleRate / 4
+        val start = (first * frameSize - padding).coerceAtLeast(0)
+        val end = (minOf(samples.size, (last + 1) * frameSize + padding))
+        if (end - start < sampleRate * 12 / 10) return samples
+        return samples.copyOfRange(start, end)
+    }
+
+    private fun getExtractor(): SpeakerEmbeddingExtractor {
+        synchronized(extractorLock) {
+            extractor?.let { return it }
+            val created = SpeakerEmbeddingExtractor(
+                assetManager = context.assets,
+                config = SpeakerEmbeddingExtractorConfig(
+                    model = modelName,
+                    numThreads = 2,
+                    debug = false,
+                    provider = "cpu"
+                )
+            )
+            extractor = created
+            return created
+        }
+    }
+
+    private fun normalize(vector: FloatArray): FloatArray? {
+        if (vector.isEmpty() || vector.any { !it.isFinite() }) return null
+        var sum = 0.0
+        vector.forEach { sum += it.toDouble() * it.toDouble() }
+        if (sum <= 1e-12) return null
+        val norm = sqrt(sum).toFloat()
+        return FloatArray(vector.size) { vector[it] / norm }
     }
 
     private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
-        var dot = 0f; var normA = 0f; var normB = 0f
-        for (i in a.indices) {
-            dot += a[i] * b[i]
-            normA += a[i] * a[i]
-            normB += b[i] * b[i]
-        }
-        if (normA == 0f || normB == 0f) return 0f
-        return dot / (sqrt(normA) * sqrt(normB))
+        if (a.size != b.size || a.isEmpty()) return -1f
+        var dot = 0f
+        for (i in a.indices) dot += a[i] * b[i]
+        return dot.coerceIn(-1f, 1f)
+    }
+
+    companion object {
+        private val extractorLock = Any()
+        @Volatile private var extractor: SpeakerEmbeddingExtractor? = null
     }
 }
