@@ -7,6 +7,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import androidx.core.content.ContextCompat
+import com.jarvis.assistant.util.SecureApiKeyStore
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,7 @@ import kotlin.math.sqrt
  */
 class VoiceAuthManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("jarvis_voice_auth", Context.MODE_PRIVATE)
+    private val secureStore = SecureApiKeyStore(context)
     private val sampleRate = 16000
     private val modelName = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
     private val threshold = 0.60f
@@ -29,6 +31,7 @@ class VoiceAuthManager(private val context: Context) {
     fun isEnrolled(): Boolean = readEmbeddings() != null
 
     fun resetEnrollment() {
+        secureStore.put("voice_embedding", "")
         prefs.edit().remove("voice_embedding").remove("voiceprint").putBoolean("enabled", false).apply()
     }
 
@@ -114,7 +117,8 @@ class VoiceAuthManager(private val context: Context) {
         // agreement across these stored speaker embeddings instead of one average.
         val encoded = SpeakerEmbeddingMatcher.encode(vectors, threshold)
             ?: return@withContext false
-        prefs.edit().putString("voice_embedding", encoded).apply()
+        secureStore.put("voice_embedding", encoded)
+        prefs.edit().remove("voice_embedding").remove("voiceprint").apply()
         true
     }
 
@@ -126,8 +130,19 @@ class VoiceAuthManager(private val context: Context) {
     }
 
     private fun readEmbeddings(): List<FloatArray>? {
-        val stored = prefs.getString("voice_embedding", null) ?: return null
-        return SpeakerEmbeddingMatcher.decode(stored)
+        secureStore.get("voice_embedding")?.let { encrypted ->
+            return SpeakerEmbeddingMatcher.decode(encrypted)
+        }
+        // One-time migration for legacy plaintext speaker templates.
+        val legacy = prefs.getString("voice_embedding", null) ?: return null
+        return try {
+            secureStore.put("voice_embedding", legacy)
+            prefs.edit().remove("voice_embedding").apply()
+            SpeakerEmbeddingMatcher.decode(legacy)
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisVoiceAuth", "Could not encrypt legacy voice template", e)
+            null
+        }
     }
 
     private fun embedding(samples: ShortArray): FloatArray? {
