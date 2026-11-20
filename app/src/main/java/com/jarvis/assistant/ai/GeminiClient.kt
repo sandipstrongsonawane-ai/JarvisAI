@@ -139,7 +139,9 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
         val discovered = linkedSetOf<String>()
         var pageToken: String? = null
 
-        repeat(5) {
+        var pageCount = 0
+        while (pageCount < 5) {
+            pageCount++
             val builder = Uri.parse("https://generativelanguage.googleapis.com/v1beta/models")
                 .buildUpon()
                 .appendQueryParameter("pageSize", "100")
@@ -153,12 +155,11 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
 
             val page = try {
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@repeat
-                    JSONObject(response.body?.string().orEmpty())
+                    if (!response.isSuccessful) null else JSONObject(response.body?.string().orEmpty())
                 }
             } catch (_: Exception) {
-                return@repeat
-            }
+                null
+            } ?: break
 
             val models = page.optJSONArray("models") ?: JSONArray()
             for (index in 0 until models.length()) {
@@ -174,7 +175,7 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
                 }
             }
             pageToken = page.optString("nextPageToken").takeIf { it.isNotBlank() && it != "null" }
-            if (pageToken == null) return@repeat
+            if (pageToken == null) break
         }
 
         return discovered.sortedWith(
