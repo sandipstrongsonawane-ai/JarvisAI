@@ -50,9 +50,9 @@ object PuppyOverlay : HudController.Listener {
             val originX = p.x
             val originY = p.y
             movement?.cancel()
-            // 3% of the original movement speed: a deliberately very slow, gentle wander.
-            // Original travel was 2.6–4.3 seconds; divide by 0.03.
-            val travelDuration = Random.nextLong(86_000L, 144_000L)
+            // 40% of the original movement speed (60% slower), as requested.
+            // Original travel was 2.6–4.3 seconds; divide by 0.4.
+            val travelDuration = Random.nextLong(6_500L, 10_750L)
             movement = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = travelDuration
                 interpolator = AccelerateDecelerateInterpolator()
