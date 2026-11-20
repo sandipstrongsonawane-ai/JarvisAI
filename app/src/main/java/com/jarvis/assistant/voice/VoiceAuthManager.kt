@@ -24,7 +24,10 @@ class VoiceAuthManager(private val context: Context) {
     private val secureStore = SecureApiKeyStore(context)
     private val sampleRate = 16000
     private val modelName = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
-    private val threshold = 0.60f
+    // CAM++ cosine scores vary with mic distance and room noise; keep majority voting
+    // across three samples while avoiding an overly strict single fixed threshold.
+    private val enrollmentThreshold = 0.45f
+    private val verificationThreshold = 0.50f
 
     fun isEnabled(): Boolean = prefs.getBoolean("enabled", false)
     fun setEnabled(enabled: Boolean) = prefs.edit().putBoolean("enabled", enabled).apply()
@@ -112,12 +115,12 @@ class VoiceAuthManager(private val context: Context) {
             for (j in i + 1 until vectors.size) {
                 val similarity = cosineSimilarity(vectors[i], vectors[j])
                 android.util.Log.i("JarvisVoiceAuth", "Enrollment similarity sample ${i + 1}-${j + 1}=$similarity threshold=$threshold")
-                if (similarity < threshold) return@withContext false
+                if (similarity < enrollmentThreshold) return@withContext false
             }
         }
         // Keep each independent enrollment sample. Verification uses majority
         // agreement across these stored speaker embeddings instead of one average.
-        val encoded = SpeakerEmbeddingMatcher.encode(vectors, threshold)
+        val encoded = SpeakerEmbeddingMatcher.encode(vectors, enrollmentThreshold)
             ?: return@withContext false
         try {
             secureStore.put("voice_embedding", encoded)
@@ -133,7 +136,7 @@ class VoiceAuthManager(private val context: Context) {
         if (samples.size < sampleRate * 12 / 10) return@withContext false
         val enrolled = readEmbeddings() ?: return@withContext false
         val candidate = embedding(samples) ?: return@withContext false
-        SpeakerEmbeddingMatcher.matches(enrolled, candidate, threshold)
+        SpeakerEmbeddingMatcher.matches(enrolled, candidate, verificationThreshold)
     }
 
     private fun readEmbeddings(): List<FloatArray>? {
@@ -156,7 +159,10 @@ class VoiceAuthManager(private val context: Context) {
         val extractor = try { getExtractor() } catch (_: Throwable) { return null }
         val stream = try { extractor.createStream() } catch (_: Throwable) { return null }
         return try {
-            val floats = FloatArray(samples.size) { samples[it] / 32768.0f }
+            // Trim leading/trailing room silence before CAM++ embedding extraction.
+            // The same path is used for enrollment and verification.
+            val speech = trimSilence(samples)
+            val floats = FloatArray(speech.size) { speech[it] / 32768.0f }
             stream.acceptWaveform(floats, sampleRate)
             stream.inputFinished()
             val vector = extractor.compute(stream)
@@ -166,6 +172,35 @@ class VoiceAuthManager(private val context: Context) {
         } finally {
             try { stream.release() } catch (_: Exception) {}
         }
+    }
+
+    private fun trimSilence(samples: ShortArray): ShortArray {
+        if (samples.size < sampleRate * 2) return samples
+        val frameSize = sampleRate / 50 // 20 ms
+        val frameRms = mutableListOf<Float>()
+        var maxRms = 0f
+        var offset = 0
+        while (offset < samples.size) {
+            val end = minOf(samples.size, offset + frameSize)
+            var energy = 0.0
+            for (i in offset until end) {
+                val value = samples[i] / 32768.0
+                energy += value * value
+            }
+            val rms = kotlin.math.sqrt(energy / (end - offset)).toFloat()
+            frameRms += rms
+            if (rms > maxRms) maxRms = rms
+            offset = end
+        }
+        val gate = maxOf(0.0035f, maxRms * 0.12f)
+        val first = frameRms.indexOfFirst { it >= gate }
+        val last = frameRms.indexOfLast { it >= gate }
+        if (first < 0 || last < first) return samples
+        val padding = sampleRate / 4
+        val start = (first * frameSize - padding).coerceAtLeast(0)
+        val end = (minOf(samples.size, (last + 1) * frameSize + padding))
+        if (end - start < sampleRate * 12 / 10) return samples
+        return samples.copyOfRange(start, end)
     }
 
     private fun getExtractor(): SpeakerEmbeddingExtractor {
