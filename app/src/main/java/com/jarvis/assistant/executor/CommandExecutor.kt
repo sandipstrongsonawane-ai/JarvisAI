@@ -30,6 +30,30 @@ class CommandExecutor(private val context: Context) {
             return com.jarvis.assistant.executor.RiskConfirmGate.hold(cmd)
         }
 
+        val missingSpecialAccess = requiredSpecialAccess(cmd).firstOrNull {
+            !isSpecialAccessEnabled(it)
+        }
+        if (missingSpecialAccess != null) {
+            return try {
+                val request = Intent(context, com.jarvis.assistant.RuntimePermissionActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, cmd.action)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, cmd.target)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, cmd.message)
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON, commandToJson(cmd).toString())
+                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_SPECIAL_ACCESS, missingSpecialAccess)
+                }
+                launchPermissionRequest(request, cmd, listOf(missingSpecialAccess))
+                when (missingSpecialAccess) {
+                    "accessibility" -> "Jarvis needs Accessibility access. Enable Jarvis in the settings page; I'll retry the action when you return."
+                    else -> "Jarvis needs notification access. Enable it in settings; I'll retry the action when you return."
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("JarvisCommandExecutor", "Could not open special-access settings", e)
+                "Required system access is off. Open Jarvis settings and enable it before retrying."
+            }
+        }
+
         val missingPermissions = requiredRuntimePermissions(cmd).filter {
             androidx.core.content.ContextCompat.checkSelfPermission(context, it) !=
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -193,6 +217,49 @@ class CommandExecutor(private val context: Context) {
             .setContentIntent(pending)
             .build()
         manager.notify(requestId, notification)
+    }
+
+    private fun requiredSpecialAccess(command: AssistantCommand): List<String> {
+        val access = linkedSetOf<String>()
+        fun collect(item: AssistantCommand) {
+            when (ActionType.fromKey(item.action)) {
+                ActionType.CLEAR_RECENTS,
+                ActionType.READ_SCREEN,
+                ActionType.SCREENSHOT,
+                ActionType.ANALYZE_SCREEN,
+                ActionType.SCREEN_ACT,
+                ActionType.SHARE_SCREEN,
+                ActionType.SCREEN_SAVE_PHONE,
+                ActionType.SCREEN_EMAIL,
+                ActionType.SCREEN_OPEN_LINK -> access += "accessibility"
+                ActionType.NOTIF_SUMMARY -> access += "notification_listener"
+                ActionType.MULTI_STEP -> item.steps.orEmpty().forEach(::collect)
+                else -> Unit
+            }
+        }
+        collect(command)
+        return access.toList()
+    }
+
+    private fun isSpecialAccessEnabled(kind: String): Boolean {
+        val setting = when (kind) {
+            "accessibility" -> android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            "notification_listener" -> "enabled_notification_listeners"
+            else -> return false
+        }
+        val enabled = android.provider.Settings.Secure.getString(context.contentResolver, setting).orEmpty()
+        val component = when (kind) {
+            "accessibility" -> android.content.ComponentName(
+                context,
+                com.jarvis.assistant.accessibility.JarvisAccessibilityService::class.java
+            )
+            "notification_listener" -> android.content.ComponentName(
+                context,
+                com.jarvis.assistant.notifications.JarvisNotificationListener::class.java
+            )
+            else -> return false
+        }.flattenToString()
+        return enabled.split(':').any { it.equals(component, ignoreCase = true) }
     }
 
     private fun requiredRuntimePermissions(command: AssistantCommand): List<String> {
