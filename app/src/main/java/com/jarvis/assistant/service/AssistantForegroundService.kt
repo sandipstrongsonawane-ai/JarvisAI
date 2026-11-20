@@ -278,9 +278,11 @@ class AssistantForegroundService : Service() {
                                 // Reset the retry budget here, not only after a wake detection.
                                 wakeResumeRetryAttempt = 0
                                 wakeResumeRetryPosted = false
-                                android.util.Log.i("JarvisService", "Background wake microphone confirmed active")
-                                try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
-                                listener?.onStateChanged(BrainState.LISTENING)
+                                android.util.Log.i("JarvisService", "Wake standby active; command SpeechRecognizer remains idle until Hey Jarvis")
+                                // OpenWakeWord owns the mic in standby, but this is NOT command
+                                // capture. Keep the UI in standby; only onWake starts listenOnce().
+                                try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+                                listener?.onStateChanged(BrainState.IDLE)
                             }
                         }
                     }
