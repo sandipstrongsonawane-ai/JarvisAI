@@ -123,8 +123,15 @@ Never claim an action is already done. For multiple actions use ordered multi_st
             val body = JSONObject().put("model", model).put("messages", messages)
                 .put("temperature", 0.1).put("max_tokens", 500)
             val response = performRequest(body)
-            if (!response.ok) return@withContext null
-            parseAssistantCommand(response.text)
+            if (!response.ok) {
+                android.util.Log.e("JarvisGroq", "Command planner request failed: ${response.error ?: "unknown provider error"}")
+                return@withContext null
+            }
+            val parsed = parseAssistantCommand(response.text)
+            if (parsed == null) {
+                android.util.Log.e("JarvisGroq", "Command planner returned an invalid/unparseable response")
+            }
+            parsed
         }
 
     private fun parseAssistantCommand(raw: String): AssistantCommand? {
