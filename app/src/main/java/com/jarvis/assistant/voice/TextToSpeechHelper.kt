@@ -9,6 +9,7 @@ import com.jarvis.assistant.util.SettingsManager
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +27,7 @@ class TextToSpeechHelper(context: Context) {
     private val androidReady = AtomicBoolean(false)
     private val androidSpeechActive = AtomicBoolean(false)
     private val cloudRequestActive = AtomicBoolean(false)
+    private val speechGeneration = AtomicInteger(0)
     private val cloudTts = ElevenLabsTtsClient(app)
     private val speechScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var pending: String? = null
@@ -69,6 +71,7 @@ class TextToSpeechHelper(context: Context) {
             .replace(" – ", ", ")
             .trim()
         if (cleaned.isEmpty()) return
+        val generation = speechGeneration.incrementAndGet()
         if (settings.getPreferCloudVoice() && cloudTts.isConfigured) {
             cloudRequestActive.set(true)
             speechScope.launch {
@@ -77,15 +80,17 @@ class TextToSpeechHelper(context: Context) {
                     cloudTts.stop()
                     try { androidTts?.stop() } catch (_: Exception) {}
                     val started = cloudTts.speak(cleaned)
-                    if (!started) {
+                    if (!started && generation == speechGeneration.get()) {
                         Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
                         speakAndroid(cleaned)
                     }
                 } finally {
-                    cloudRequestActive.set(false)
+                    if (generation == speechGeneration.get()) cloudRequestActive.set(false)
                 }
             }
         } else {
+            cloudTts.stop()
+            cloudRequestActive.set(false)
             speakAndroid(cleaned)
         }
     }
@@ -155,6 +160,7 @@ class TextToSpeechHelper(context: Context) {
             pending != null
 
     fun stop() {
+        speechGeneration.incrementAndGet()
         pending = null
         cloudRequestActive.set(false)
         androidSpeechActive.set(false)
