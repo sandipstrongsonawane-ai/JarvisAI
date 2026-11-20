@@ -15,7 +15,7 @@ internal object ReplyLanguageDetector {
         "kasa", "kashi", "kase", "kay", "kaay", "kuthe", "ithe", "tithe",
         "ikde", "tikde", "ata", "aata", "zala", "zalay", "jhala", "jhalay",
         "karuya", "karaycha", "karaychi", "kartoy", "kartey", "nahiye",
-        "barobar", "changla", "changli", "chhan", "mast", "hoil"
+        "barobar", "changla", "changli", "chhan", "mast", "hoil", "namaskar"
     )
     private val hindiLatin = setOf(
         "hai", "hain", "hoon", "hu", "kya", "kyun", "kaise", "kaisa",
@@ -24,15 +24,16 @@ internal object ReplyLanguageDetector {
         "yahan", "wahan", "hua", "kitna", "kab", "kahan", "theek", "accha", "acha"
     )
     private val marathiScript = setOf(
-        "आहे", "आहात", "आहोत", "आहेत", "मला", "तुला", "तुम्हाला",
+        "आहे", "आहात", "आहोत", "आहेत", "मला", "तुला", "तुम्हाला", "तुम्ही",
         "माझा", "माझी", "माझे", "आम्ही", "आमचा", "आमची",
         "कुठे", "इथे", "तिथे", "आता", "झालं", "झाला", "झाली",
         "करूया", "करतो", "करते", "होईल", "बरं", "छान",
-        "चांगला", "चांगली", "मस्त", "काय"
+        "चांगला", "चांगली", "मस्त", "काय", "कसे", "कसा", "कशी",
+        "म्हणजे", "नाही", "आणि", "पण", "तुझं"
     )
     private val hindiScript = setOf(
         "है", "हैं", "हूँ", "मुझे", "मुझको", "आप", "तुम", "क्यों",
-        "कैसे", "करना", "रहा", "रही", "अभी", "यहाँ", "वहाँ", "क्या"
+        "कैसे", "करना", "रहा", "रही", "अभी", "यहाँ", "वहाँ", "क्या", "नहीं"
     )
 
     fun detect(text: String): Locale {
