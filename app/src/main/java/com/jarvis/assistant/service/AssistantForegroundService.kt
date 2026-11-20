@@ -243,8 +243,18 @@ class AssistantForegroundService : Service() {
                             try { detector.stop() } catch (_: Exception) {}
                             openWake = null
                             try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
-                            android.util.Log.e("JarvisService", "OpenWakeWord stream died after startup; retrying", error)
+                            listener?.onStateChanged(BrainState.IDLE)
+                            android.util.Log.e("JarvisService", "OpenWakeWord audio heartbeat failed; retrying", error)
                             scheduleWakeResumeRetry()
+                        }
+                    }
+                },
+                onReady = {
+                    mainHandler.post {
+                        if (openWake === detector && !externalMicSessionActive && !listenCycleRunning) {
+                            android.util.Log.i("JarvisService", "Background wake microphone confirmed active")
+                            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
+                            listener?.onStateChanged(BrainState.LISTENING)
                         }
                     }
                 }
