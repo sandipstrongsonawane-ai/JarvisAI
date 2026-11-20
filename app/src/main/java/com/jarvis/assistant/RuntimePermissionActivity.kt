@@ -62,14 +62,55 @@ class RuntimePermissionActivity : AppCompatActivity() {
             finish()
             return
         }
+        val rawCommand = intent.getStringExtra(EXTRA_COMMAND_JSON)
+        val command = rawCommand?.let {
+            try { commandFromJson(org.json.JSONObject(it)) } catch (_: Exception) { null }
+        } ?: com.jarvis.assistant.model.AssistantCommand(
+            action,
+            intent.getStringExtra(EXTRA_TARGET),
+            intent.getStringExtra(EXTRA_MESSAGE)
+        )
+
+        // A text-originated action may not have microphone permission. Do not start a
+        // microphone foreground service just to execute an already-authorized action.
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            val result = com.jarvis.assistant.executor.CommandExecutor(this).executeConfirmed(command)
+            Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
         val resume = Intent(this, AssistantForegroundService::class.java).apply {
             action = AssistantForegroundService.ACTION_EXECUTE_DEFERRED_COMMAND
-            putExtra(EXTRA_ACTION, action)
-            putExtra(EXTRA_TARGET, intent.getStringExtra(EXTRA_TARGET))
-            putExtra(EXTRA_MESSAGE, intent.getStringExtra(EXTRA_MESSAGE))
-            putExtra(EXTRA_COMMAND_JSON, intent.getStringExtra(EXTRA_COMMAND_JSON))
+            putExtra(EXTRA_ACTION, command.action)
+            putExtra(EXTRA_TARGET, command.target)
+            putExtra(EXTRA_MESSAGE, command.message)
+            putExtra(EXTRA_COMMAND_JSON, rawCommand)
         }
         ContextCompat.startForegroundService(this, resume)
         finish()
+    }
+
+    private fun commandFromJson(json: org.json.JSONObject): com.jarvis.assistant.model.AssistantCommand {
+        val extra = linkedMapOf<String, String>()
+        json.optJSONObject("extra")?.let { values ->
+            val keys = values.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                extra[key] = values.optString(key)
+            }
+        }
+        val steps = json.optJSONArray("steps")?.let { array ->
+            (0 until array.length()).map { commandFromJson(array.getJSONObject(it)) }
+        }
+        return com.jarvis.assistant.model.AssistantCommand(
+            action = json.optString("action"),
+            target = json.optString("target").takeUnless { it.isBlank() || it == "null" },
+            message = json.optString("message").takeUnless { it.isBlank() || it == "null" },
+            extra = extra,
+            steps = steps
+        )
     }
 }
