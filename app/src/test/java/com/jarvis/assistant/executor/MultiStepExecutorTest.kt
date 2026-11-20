@@ -53,6 +53,24 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun treatsCannotLaunchResponseAsHardFailure() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "Can't launch YouTube."
+        }.execute(
+            listOf(
+                AssistantCommand("open_app", target = "YouTube"),
+                AssistantCommand("play_media", target = "song", message = "youtube")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("Can't launch YouTube"))
+    }
+
+    @Test
     fun rejectsSequencesAboveSafetyLimit() {
         val steps = List(MultiStepExecutor.MAX_STEPS + 1) { index ->
             AssistantCommand("open_app", target = "App$index")
