@@ -45,7 +45,6 @@ object RiskConfirmGate {
             // Calls remain immediate when explicitly requested. Messages and destructive
             // actions require a second confirmation to prevent speech-recognition mistakes.
             ActionType.CALL -> false
-            ActionType.MULTI_STEP,
             ActionType.UNLOCK_APP,
             ActionType.UNINSTALL_APP,
             ActionType.SEND_SMS,
@@ -53,6 +52,7 @@ object RiskConfirmGate {
             ActionType.TELEGRAM_MESSAGE,
             ActionType.SET_PIN,
             ActionType.UNLOCK_PHONE -> true
+            ActionType.MULTI_STEP -> cmd.steps.orEmpty().any { isRisky(it) }
             else -> {
                 val a = cmd.action.lowercase()
                 a.contains("delete") || a.contains("wipe")
