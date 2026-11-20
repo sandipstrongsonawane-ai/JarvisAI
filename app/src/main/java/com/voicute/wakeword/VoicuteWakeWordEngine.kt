@@ -46,7 +46,7 @@ class VoicuteWakeWordEngine(context: Context) {
         inferenceThread = Thread({
             try {
                 while (running && !Thread.currentThread().isInterrupted) {
-                    if (activeCapture.getSamplesAvailable() < activeEngine.audioSamplesNeeded) {
+                    if (activeCapture.getSamplesAvailable() < (activeEngine.audioSamplesNeeded / 4)) {
                         Thread.sleep(10L)
                         continue
                     }
