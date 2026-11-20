@@ -811,9 +811,9 @@ private fun setAlarm(target: String?): String {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             val accessibility = JarvisAccessibilityService.instance
-            accessibility?.autoTapSend("com.whatsapp")
+            accessibility?.autoTapSend("com.whatsapp", target)
             if (accessibility != null) {
-                "WhatsApp opened with a prepared message for $target. An automatic Send attempt was started, but delivery is not verified; please check the chat."
+                "WhatsApp opened with a prepared message for $target. An automatic Send attempt is allowed only when the expected chat is visible; delivery is not verified, so please check the chat."
             } else {
                 "WhatsApp opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
             }
@@ -823,9 +823,9 @@ private fun setAlarm(target: String?): String {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 })
                 val accessibility = JarvisAccessibilityService.instance
-                accessibility?.autoTapSend("com.whatsapp")
+                accessibility?.autoTapSend("com.whatsapp", target)
                 if (accessibility != null) {
-                    "WhatsApp opened with a prepared message for $target. An automatic Send attempt was started, but delivery is not verified; please check the chat."
+                    "WhatsApp opened with a prepared message for $target. An automatic Send attempt is allowed only when the expected chat is visible; delivery is not verified, so please check the chat."
                 } else {
                     "WhatsApp opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
                 }
@@ -849,9 +849,9 @@ private fun setAlarm(target: String?): String {
 
         return if (sent) {
             val accessibility = JarvisAccessibilityService.instance
-            accessibility?.autoTapSend("org.telegram.messenger")
+            accessibility?.autoTapSend("org.telegram.messenger", target)
             if (accessibility != null) {
-                "Telegram opened with a prepared message for $target. An automatic Send attempt was started, but delivery is not verified; please check the chat."
+                "Telegram opened with a prepared message for $target. An automatic Send attempt is allowed only when the expected chat is visible; delivery is not verified, so please check the chat."
             } else {
                 "Telegram opened with a prepared message for $target. Tap Send to send it; delivery is not verified."
             }

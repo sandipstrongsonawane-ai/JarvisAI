@@ -149,10 +149,10 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
-    fun autoTapSend(expectedPackage: String, attemptsLeft: Int = 6) {
+    fun autoTapSend(expectedPackage: String, expectedRecipient: String, attemptsLeft: Int = 6) {
         val allowedPackages = setOf("com.whatsapp", "org.telegram.messenger")
-        if (expectedPackage !in allowedPackages) {
-            Log.w("JarvisAccessibility", "autoTapSend: blocked unsupported package=$expectedPackage")
+        if (expectedPackage !in allowedPackages || expectedRecipient.isBlank()) {
+            Log.w("JarvisAccessibility", "autoTapSend: blocked invalid package or recipient")
             return
         }
         if (attemptsLeft <= 0) {
@@ -163,7 +163,12 @@ class JarvisAccessibilityService : AccessibilityService() {
             val root = rootInActiveWindow
             val activePackage = root?.packageName?.toString()
             if (root == null || activePackage != expectedPackage) {
-                autoTapSend(expectedPackage, attemptsLeft - 1)
+                autoTapSend(expectedPackage, expectedRecipient, attemptsLeft - 1)
+                return@postDelayed
+            }
+            if (!containsRecipient(root, expectedRecipient)) {
+                Log.w("JarvisAccessibility", "autoTapSend: expected recipient not visible in $expectedPackage")
+                autoTapSend(expectedPackage, expectedRecipient, attemptsLeft - 1)
                 return@postDelayed
             }
             val target = findSendButton(root)
@@ -176,9 +181,30 @@ class JarvisAccessibilityService : AccessibilityService() {
             if (clicked) {
                 Log.d("JarvisAccessibility", "autoTapSend: Send click accepted by $expectedPackage")
             } else {
-                autoTapSend(expectedPackage, attemptsLeft - 1)
+                autoTapSend(expectedPackage, expectedRecipient, attemptsLeft - 1)
             }
         }, 700)
+    }
+
+    private fun containsRecipient(node: AccessibilityNodeInfo, expectedRecipient: String): Boolean {
+        val expected = expectedRecipient.trim()
+        val text = node.text?.toString().orEmpty()
+        val description = node.contentDescription?.toString().orEmpty()
+        if (text.contains(expected, ignoreCase = true) ||
+            description.contains(expected, ignoreCase = true)
+        ) return true
+        val expectedDigits = expected.filter(Char::isDigit)
+        if (expectedDigits.length >= 7) {
+            val expectedTail = expectedDigits.takeLast(10)
+            val nodeDigits = (text + " " + description).filter(Char::isDigit)
+            if (nodeDigits.contains(expectedTail)) return true
+        }
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child ->
+                if (containsRecipient(child, expected)) return true
+            }
+        }
+        return false
     }
 
     private fun findSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
