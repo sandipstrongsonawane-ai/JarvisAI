@@ -10,8 +10,8 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * JARVIS TTS — Piper first, Android system TTS always as fallback.
- * Never goes fully mute if the device has any TTS engine.
+ * JARVIS TTS — Piper is used only for English; Hindi/Marathi always use
+ * a matching Android system voice. Android TTS remains the universal fallback.
  */
 class TextToSpeechHelper(context: Context) {
 
@@ -32,7 +32,7 @@ class TextToSpeechHelper(context: Context) {
                     pending = null
                     speak(t)
                 }
-                Log.i(TAG, "Android TTS ready (fallback)")
+                Log.i(TAG, "Android TTS ready")
             } else {
                 Log.e(TAG, "Android TTS init failed: $status")
             }
@@ -44,8 +44,8 @@ class TextToSpeechHelper(context: Context) {
                 Log.e(TAG, "Android TTS utterance error")
             }
         })
-        if (piper.isReady) Log.i(TAG, "Piper available")
-        else Log.w(TAG, "Piper not ready — using Android TTS fallback")
+        if (piper.isReady) Log.i(TAG, "Piper available for English replies")
+        else Log.w(TAG, "Piper unavailable — Android TTS will handle all languages")
     }
 
     fun speak(text: String) {
@@ -56,19 +56,22 @@ class TextToSpeechHelper(context: Context) {
             .trim()
         if (cleaned.isEmpty()) return
 
-        // Prefer Piper when native stack is ready
-        if (piper.isReady) {
+        val replyLocale = ReplyLanguageDetector.detect(cleaned)
+        // The bundled Piper model is English-only. Never let it read Hindi or
+        // Marathi text with an English phoneme model, even if Piper is installed.
+        if (replyLocale.language == "en" && piper.isReady) {
             try {
                 piper.stop()
-                val ok = piper.speak(cleaned)
-                if (ok) {
-                    Log.i(TAG, "Spoke via Piper")
+                if (piper.speak(cleaned)) {
+                    Log.i(TAG, "Spoke via Piper locale=$replyLocale")
                     return
                 }
                 Log.w(TAG, "Piper speak failed — falling back to Android TTS")
             } catch (e: Exception) {
                 Log.e(TAG, "Piper error: ${e.message}")
             }
+        } else if (replyLocale.language != "en") {
+            Log.i(TAG, "Bypassing English-only Piper for locale=$replyLocale")
         }
 
         speakAndroid(cleaned)
@@ -87,7 +90,7 @@ class TextToSpeechHelper(context: Context) {
             val id = UUID.randomUUID().toString()
             val r = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
             if (r == TextToSpeech.ERROR) Log.e(TAG, "Android speak ERROR")
-            else Log.i(TAG, "Spoke via Android TTS")
+            else Log.i(TAG, "Spoke via Android TTS locale=${ReplyLanguageDetector.detect(text)}")
         } catch (e: Exception) {
             Log.e(TAG, "Android speak failed: ${e.message}")
         }
@@ -96,23 +99,23 @@ class TextToSpeechHelper(context: Context) {
     private fun configureAndroidVoice(text: String = "") {
         val tts = androidTts ?: return
         try {
-            val requestedLocale = detectReplyLocale(text)
-            val available = try { tts.voices } catch (_: Exception) { null }
+            val requestedLocale = ReplyLanguageDetector.detect(text)
             val localeCandidates = when (requestedLocale.language) {
                 "mr" -> listOf(Locale("mr", "IN"), Locale("hi", "IN"), Locale("en", "IN"))
                 "hi" -> listOf(Locale("hi", "IN"), Locale("mr", "IN"), Locale("en", "IN"))
                 else -> listOf(Locale("en", "IN"), Locale.UK, Locale.US)
             }
+            val available = try { tts.voices } catch (_: Exception) { null }
             var chosen = false
             if (available != null) {
                 for (locale in localeCandidates) {
-                    val exact = available.filter { it.locale.language == locale.language &&
-                        (it.locale.country.isEmpty() || it.locale.country == locale.country) }
-                    if (exact.isEmpty()) continue
-                    // Prefer a voice with a feminine/warm name hint if the engine exposes one;
-                    // otherwise use the highest-quality matching locale voice.
-                    val preferred = exact.firstOrNull { voiceNameSuggestsFeminine(it.name) }
-                        ?: exact.maxByOrNull { it.quality }
+                    val matching = available.filter {
+                        it.locale.language == locale.language &&
+                            (it.locale.country.isEmpty() || it.locale.country == locale.country)
+                    }
+                    if (matching.isEmpty()) continue
+                    val preferred = matching.firstOrNull { voiceNameSuggestsFeminine(it.name) }
+                        ?: matching.maxByOrNull { it.quality }
                     if (preferred != null) {
                         tts.voice = preferred
                         chosen = true
@@ -125,36 +128,18 @@ class TextToSpeechHelper(context: Context) {
                 val fallbackLocale = localeCandidates.firstOrNull { locale ->
                     tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
                 } ?: Locale.getDefault()
-                tts.language = fallbackLocale
-                Log.w(TAG, "No matching voice listed; language fallback=${fallbackLocale}")
+                val result = tts.setLanguage(fallbackLocale)
+                Log.i(TAG, "TTS language fallback=$fallbackLocale result=$result")
             }
-            val speed = settings.getVoiceSpeed().coerceIn(0.7f, 1.4f)
-            val pitch = settings.getVoicePitch().coerceIn(0.8f, 1.2f)
-            tts.setSpeechRate(speed)
-            tts.setPitch(pitch)
+            tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
+            tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
         } catch (e: Exception) {
             Log.w(TAG, "configureAndroidVoice: ${e.message}")
         }
     }
 
-    private fun detectReplyLocale(text: String): Locale {
-        val lower = text.lowercase()
-        val marathiHints = listOf(
-            "आहे", "आहोत", "नाही", "काय", "म्हणजे", "करूया", "करतो", "करते",
-            "बरं", "मस्त", "तुम्ही", "तुझं", "आणि", "पण", "झालं", "चालेल", "होईल"
-        )
-        val hasDevanagari = text.any { it in 'अ'..'ॿ' }
-        val hasMarathiHint = marathiHints.any { lower.contains(it) }
-        return when {
-            hasMarathiHint -> Locale("mr", "IN")
-            hasDevanagari -> Locale("hi", "IN")
-            lower.contains("namaskar") || lower.contains("kay") || lower.contains("barobar") -> Locale("mr", "IN")
-            else -> Locale("hi", "IN")
-        }
-    }
-
     private fun voiceNameSuggestsFeminine(name: String): Boolean {
-        val lower = name.lowercase()
+        val lower = name.lowercase(Locale.ROOT)
         return listOf("female", "woman", "feminine").any { lower.contains(it) }
     }
 
