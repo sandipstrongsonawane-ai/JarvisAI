@@ -32,7 +32,6 @@ android {
         buildConfigField("String", "GROQ_API_KEY", "\"\"")
         buildConfigField("String", "ELEVENLABS_API_KEY", "\"\"")
         // Optional: Voices → copy ID from https://elevenlabs.io/app/voice-library
-        buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"\"")
     }
 
     buildTypes {
