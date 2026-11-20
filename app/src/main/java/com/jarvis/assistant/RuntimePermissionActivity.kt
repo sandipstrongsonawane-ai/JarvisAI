@@ -18,6 +18,7 @@ class RuntimePermissionActivity : AppCompatActivity() {
         const val EXTRA_TARGET = "jarvis.permission.target"
         const val EXTRA_MESSAGE = "jarvis.permission.message"
         const val EXTRA_PERMISSIONS = "jarvis.permission.permissions"
+        const val EXTRA_COMMAND_JSON = "jarvis.permission.command_json"
     }
 
     private val permissionLauncher = registerForActivityResult(
@@ -66,6 +67,7 @@ class RuntimePermissionActivity : AppCompatActivity() {
             putExtra(EXTRA_ACTION, action)
             putExtra(EXTRA_TARGET, intent.getStringExtra(EXTRA_TARGET))
             putExtra(EXTRA_MESSAGE, intent.getStringExtra(EXTRA_MESSAGE))
+            putExtra(EXTRA_COMMAND_JSON, intent.getStringExtra(EXTRA_COMMAND_JSON))
         }
         ContextCompat.startForegroundService(this, resume)
         finish()
