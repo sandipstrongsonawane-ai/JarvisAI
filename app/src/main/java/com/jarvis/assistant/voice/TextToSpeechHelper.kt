@@ -103,7 +103,11 @@ class TextToSpeechHelper(context: Context) {
             return
         }
         try {
-            configureAndroidVoice(text)
+            if (!configureAndroidVoice(text)) {
+                androidSpeechActive.set(false)
+                Log.e(TAG, "No female Android voice is installed; refusing male/default voice fallback")
+                return
+            }
             tts.stop()
             val id = UUID.randomUUID().toString()
             androidSpeechActive.set(true)
@@ -119,27 +123,35 @@ class TextToSpeechHelper(context: Context) {
         }
     }
 
-    private fun configureAndroidVoice(text: String = "") {
-        val tts = androidTts ?: return
-        try {
+    private fun configureAndroidVoice(text: String = ""): Boolean {
+        val tts = androidTts ?: return false
+        return try {
             val locale = ReplyLanguageDetector.detect(text)
             val languageResult = tts.setLanguage(locale)
             val voices = tts.voices.orEmpty()
             val femaleVoice = voices
-                .filter { it.locale.language.equals(locale.language, ignoreCase = true) }
                 .filter { voiceNameSuggestsFeminine(it.name) }
+                .filter { it.locale.language.equals(locale.language, ignoreCase = true) }
                 .maxByOrNull { it.quality }
+                ?: voices
+                    .filter { voiceNameSuggestsFeminine(it.name) }
+                    .filter { it.locale.language.equals("en", ignoreCase = true) }
+                    .maxByOrNull { it.quality }
 
-            if (femaleVoice != null) {
-                tts.voice = femaleVoice
-                Log.i(TAG, "Selected female TTS voice=${femaleVoice.name} locale=${femaleVoice.locale}")
+            if (femaleVoice == null) {
+                Log.w(TAG, "No female Android voice installed for locale=$locale; languageResult=$languageResult")
+                false
             } else {
-                Log.w(TAG, "No identifiable female voice installed for locale=$locale; retaining engine default (languageResult=$languageResult)")
+                tts.voice = femaleVoice
+                tts.setLanguage(femaleVoice.locale)
+                Log.i(TAG, "Selected female TTS voice=${femaleVoice.name} locale=${femaleVoice.locale}")
+                tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
+                tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
+                true
             }
-            tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
-            tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
         } catch (e: Exception) {
             Log.w(TAG, "configureAndroidVoice: ${e.message}", e)
+            false
         }
     }
 
