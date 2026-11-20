@@ -32,6 +32,7 @@ class ElevenLabsTtsClient(private val context: Context) {
         .build()
 
     private var player: MediaPlayer? = null
+    @Volatile private var activeCall: okhttp3.Call? = null
 
     val isConfigured: Boolean
         get() = BuildConfig.ELEVENLABS_API_KEY.trim().isNotEmpty()
@@ -49,6 +50,7 @@ class ElevenLabsTtsClient(private val context: Context) {
      */
     suspend fun speak(text: String): Boolean = withContext(Dispatchers.IO) {
         if (!isConfigured || text.isBlank()) return@withContext false
+        stop()
         val cleaned = text
             .replace("...", ", ")
             .replace(" — ", ", ")
@@ -77,7 +79,10 @@ class ElevenLabsTtsClient(private val context: Context) {
                 .post(bodyJson.toString().toRequestBody(JSON_MEDIA))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val call = client.newCall(request)
+            activeCall = call
+            call.execute().use { response ->
+                if (call.isCanceled()) return@withContext false
                 if (!response.isSuccessful) {
                     val err = response.body?.string()?.take(200) ?: ""
                     Log.e(TAG, "ElevenLabs HTTP ${response.code}: $err")
@@ -86,6 +91,7 @@ class ElevenLabsTtsClient(private val context: Context) {
                 val bytes = response.body?.bytes() ?: return@withContext false
                 if (bytes.isEmpty()) return@withContext false
 
+                activeCall = null
                 val cache = File(context.cacheDir, "jarvis_tts_el.mp3")
                 cache.writeBytes(bytes)
 
@@ -136,7 +142,18 @@ class ElevenLabsTtsClient(private val context: Context) {
         }
     }
 
+    fun isPlaying(): Boolean = try {
+        player?.isPlaying == true
+    } catch (_: Exception) {
+        false
+    }
+
     fun stop() {
+        try {
+            activeCall?.cancel()
+        } catch (_: Exception) {
+        }
+        activeCall = null
         try {
             player?.stop()
         } catch (_: Exception) {

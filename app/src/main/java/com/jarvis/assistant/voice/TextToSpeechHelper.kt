@@ -24,6 +24,8 @@ class TextToSpeechHelper(context: Context) {
     private val settings = SettingsManager(app)
     private var androidTts: TextToSpeech? = null
     private val androidReady = AtomicBoolean(false)
+    private val androidSpeechActive = AtomicBoolean(false)
+    private val cloudRequestActive = AtomicBoolean(false)
     private val cloudTts = ElevenLabsTtsClient(app)
     private val speechScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var pending: String? = null
@@ -45,10 +47,18 @@ class TextToSpeechHelper(context: Context) {
             }
         }
         androidTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {}
+            override fun onStart(utteranceId: String?) {
+                androidSpeechActive.set(true)
+            }
+            override fun onDone(utteranceId: String?) {
+                androidSpeechActive.set(false)
+            }
             override fun onError(utteranceId: String?) {
+                androidSpeechActive.set(false)
                 Log.e(TAG, "Android TTS utterance error")
+            }
+            override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                androidSpeechActive.set(false)
             }
         })
     }
@@ -60,13 +70,19 @@ class TextToSpeechHelper(context: Context) {
             .trim()
         if (cleaned.isEmpty()) return
         if (settings.getPreferCloudVoice() && cloudTts.isConfigured) {
+            cloudRequestActive.set(true)
             speechScope.launch {
-                // Do not let Android TTS overlap a cloud utterance.
-                try { androidTts?.stop() } catch (_: Exception) {}
-                val started = cloudTts.speak(cleaned)
-                if (!started) {
-                    Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
-                    speakAndroid(cleaned)
+                try {
+                    // Cancel any older cloud request before starting this utterance.
+                    cloudTts.stop()
+                    try { androidTts?.stop() } catch (_: Exception) {}
+                    val started = cloudTts.speak(cleaned)
+                    if (!started) {
+                        Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
+                        speakAndroid(cleaned)
+                    }
+                } finally {
+                    cloudRequestActive.set(false)
                 }
             }
         } else {
@@ -85,9 +101,14 @@ class TextToSpeechHelper(context: Context) {
             configureAndroidVoice(text)
             tts.stop()
             val id = UUID.randomUUID().toString()
+            androidSpeechActive.set(true)
             val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
-            if (result == TextToSpeech.ERROR) Log.e(TAG, "Android speak ERROR")
-            else Log.i(TAG, "Spoke using female-first Android voice locale=${ReplyLanguageDetector.detect(text)}")
+            if (result == TextToSpeech.ERROR) {
+                androidSpeechActive.set(false)
+                Log.e(TAG, "Android speak ERROR")
+            } else {
+                Log.i(TAG, "Spoke using female-first Android voice locale=${ReplyLanguageDetector.detect(text)}")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Android speak failed: ${e.message}", e)
         }
@@ -127,7 +148,16 @@ class TextToSpeechHelper(context: Context) {
         ).any { lower.contains(it) }
     }
 
+    fun isSpeaking(): Boolean =
+        cloudRequestActive.get() ||
+            cloudTts.isPlaying() ||
+            androidSpeechActive.get() ||
+            pending != null
+
     fun stop() {
+        pending = null
+        cloudRequestActive.set(false)
+        androidSpeechActive.set(false)
         try { cloudTts.stop() } catch (_: Exception) {}
         try { androidTts?.stop() } catch (_: Exception) {}
     }

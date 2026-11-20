@@ -435,13 +435,18 @@ class AssistantForegroundService : Service() {
                 resultText
             }
             tts.speak(speechText)
-            // Stay in the active conversation state; do not show standby between
-            // consecutive commands. Follow-up STT below keeps the session alive.
-            // A tap on the puppy interrupts TTS and opens a fresh listening cycle.
-            // Siri-level: after speaking, one follow-up listen (no second Hey Jarvis), then wake
-            mainHandler.postDelayed({
-                if (!listenCycleRunning) startFollowUpListen()
-            }, 2500L)
+            // Wait for the selected voice (cloud or Android) to finish before
+            // reopening the microphone. This prevents TTS echo and clipped replies.
+            val speechFinished = withTimeoutOrNull(45_000L) {
+                while (tts.isSpeaking()) delay(100L)
+                true
+            } ?: false
+            if (!speechFinished) {
+                android.util.Log.w("JarvisService", "TTS completion timed out; stopping playback before listening")
+                tts.stop()
+            }
+            // Keep the follow-up window without requiring a second wake phrase.
+            if (!listenCycleRunning) startFollowUpListen()
         }
     }
 
