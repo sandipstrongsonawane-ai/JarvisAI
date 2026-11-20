@@ -89,7 +89,7 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
         if (apiKey.isBlank()) {
             return@withContext AssistantCommand(action = "reply", message = "Gemini API key missing. Add it in Settings.")
         }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${android.net.Uri.encode(apiKey)}"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${android.net.Uri.encode(apiKey)}"
 
         val request = Request.Builder()
             .url(url)
@@ -101,7 +101,7 @@ class GeminiClient(private val apiKeyProvider: () -> String?) {
             if (!response.isSuccessful) {
                 return@withContext AssistantCommand(
                     action = "reply",
-                    message = "API error: ${response.code}"
+                    message = "Gemini API error: ${response.code}: ${response.body?.string()?.take(500).orEmpty()}"
                 )
             }
             val raw = response.body?.string() ?: return@withContext fallback()
