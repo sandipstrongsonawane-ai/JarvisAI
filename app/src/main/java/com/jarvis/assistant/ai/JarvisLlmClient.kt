@@ -113,7 +113,7 @@ Use reply for normal conversation. Parameter rules:
 - toggle_setting target must be exactly wifi, bluetooth, flashlight, or airplane_mode (Android may open system settings where direct toggling is restricted).
 - set_volume target is up, down, mute, max, or a 0-100 number. media_control target is play, pause, next, previous, or stop.
 - set_alarm target is 24-hour HH:mm. set_timer target is total seconds as a number string.
-- play_media target is the song/search query and message may specify spotify, youtube music, or youtube.
+- play_media target is the song/search query and message may specify spotify, youtube music, or youtube.\n- navigate target is the exact destination/place; message is driving, walking, cycling, or transit.
 - web_search target is the search query. set_reminder target is minutes and message is reminder text.
 Never claim an action is already done. For multiple actions use ordered multi_step steps without nesting. Understand Hindi, English and Hinglish only; match the user's language naturally. Do not generate Marathi. Keep command targets and message bodies accurate. JSON only, no markdown.
 """ + if (memoryContext.isNotBlank()) "\nMemory context:\n$memoryContext" else ""
