@@ -46,7 +46,7 @@ class OpenWakeWordEngine(private val context: Context) {
             }
             Log.i(TAG, "started — say Hey Jarvis")
             true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e(TAG, "start failed: " + e.message, e)
             false
         }
