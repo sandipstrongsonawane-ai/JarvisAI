@@ -1072,7 +1072,7 @@ class OfflineBrain(
         containsAny(cmd, "open camera", "camera kholo", "camera on karo") -> AssistantCommand("open_app", "Camera")
         containsAny(cmd, "open gallery", "open photos", "gallery kholo") -> AssistantCommand("open_app", "Gallery")
         containsAny(cmd, "open chrome", "open browser", "browser kholo") -> AssistantCommand("open_app", "Chrome")
-        containsAny(cmd, "open youtube", "youtube kholo") -> AssistantCommand("open_app", "YouTube")
+        containsAny(cmd, "open youtube", "youtube kholo", "youtube khol", "youtube open", "youtube open karo", "youtube chalu karo") -> AssistantCommand("open_app", "YouTube")
         containsAny(cmd, "open whatsapp business", "whatsapp business kholo", "wa business", "business whatsapp") -> AssistantCommand("open_app", "WhatsApp Business")
         containsAny(cmd, "open whatsapp", "whatsapp kholo") -> AssistantCommand("open_app", "WhatsApp")
         containsAny(cmd, "open telegram", "telegram kholo") -> AssistantCommand("open_app", "Telegram")
@@ -1117,17 +1117,11 @@ class OfflineBrain(
             AssistantCommand("play_media", q.ifBlank { null }, "spotify")
         }
         containsAny(cmd, "play on youtube music", "youtube music pe", "yt music") -> {
-            val q = original
-                .replace(Regex("(?i)play on youtube music|youtube music pe|yt music|on youtube music"), "")
-                .replace(Regex("(?i)\b(play|chalao|chala|karo)\b"), "")
-                .trim()
+            val q = extractMediaSearchQuery(original)
             AssistantCommand("play_media", q.ifBlank { null }, "youtube music")
         }
-        containsAny(cmd, "play on youtube", "youtube pe", "youtube par") -> {
-            val q = original
-                .replace(Regex("(?i)play on youtube|youtube pe|youtube par|on youtube"), "")
-                .replace(Regex("(?i)\b(chalao|chala|karo|play)\b"), "")
-                .trim()
+        containsAny(cmd, "play on youtube", "youtube pe", "youtube par", "youtube par chalao") -> {
+            val q = extractMediaSearchQuery(original)
             AssistantCommand("play_media", q.ifBlank { null }, "youtube")
         }
         containsAny(cmd, "play music", "play song", "gaana chalao", "gana chalao") ||
@@ -1319,6 +1313,21 @@ class OfflineBrain(
 
         else -> null
         }
+    }
+
+    private fun extractMediaSearchQuery(original: String): String {
+        var query = original.trim()
+        query = query.replace(
+            Regex("""(?i)^\s*(?:please\s+)?(?:play|lagao|laga do|chalao|chala do|chala|start)\s+"""),
+            ""
+        )
+        query = query.replace(Regex("""(?i)^\s*(?:song|music|gaana|gana)\s+"""), "")
+        query = query.replace(
+            Regex("""(?i)\s*(?:on\s+)?(?:youtube music|yt music|youtube|spotify)\s*(?:par|pe)?\s*(?:chalao|chala do|laga do)?\s*$"""),
+            ""
+        )
+        query = query.replace(Regex("""(?i)\s+(?:laga do|lagao|chalao|chala do)$"""), "")
+        return query.trim()
     }
 
     /**
