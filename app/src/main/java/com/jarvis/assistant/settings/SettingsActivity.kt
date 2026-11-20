@@ -568,71 +568,22 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun runEnrollment() {
-        toast("Voice enrollment starting. Background wake will pause briefly so enrollment can use the microphone, then resume automatically.")
+        toast("Enrolling — say a short phrase 3 times when prompted.")
         scope.launch {
-            var wakePaused = false
-            try {
-                val pauseIntent = Intent(this@SettingsActivity, com.jarvis.assistant.service.AssistantForegroundService::class.java).apply {
-                    action = com.jarvis.assistant.service.AssistantForegroundService.ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC
-                }
-                ContextCompat.startForegroundService(this@SettingsActivity, pauseIntent)
-                wakePaused = true
-                // Let the foreground service stop and release AudioRecord before enrollment opens it.
-                kotlinx.coroutines.delay(700L)
-
-                val samples = mutableListOf<ShortArray>()
-                val enrollmentPhrase = "Meri awaaz pehchano"
-                val prompts = listOf(
-                    "First sample. Say: $enrollmentPhrase",
-                    "Second sample. Repeat exactly: $enrollmentPhrase",
-                    "Final sample. Repeat exactly: $enrollmentPhrase"
-                )
-                for (i in prompts.indices) {
-                    tts.speak(prompts[i])
-                    val promptFinished = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
-                        while (tts.isSpeaking()) kotlinx.coroutines.delay(100L)
-                        true
-                    } ?: false
-                    if (!promptFinished) {
-                        tts.stop()
-                        toast("Voice prompt did not finish. Please retry enrollment.")
-                        return@launch
-                    }
-                    val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(5000) }
-                    if (sample == null) {
-                        toast("Sample ${i + 1} was too quiet or too short. Enrollment stopped; please retry.")
-                        tts.speak("I could not capture that sample. Please try enrollment again in a quiet place.")
-                        return@launch
-                    }
-                    samples += sample
-                    kotlinx.coroutines.delay(500L)
-                }
-                val enrolled = voiceAuth.enrollFromSamples(samples)
-                if (!enrolled) {
-                    toast(voiceAuth.lastEnrollmentFailureReason() ?: "Voice samples did not match reliably. Keep the phone 15–20 cm away and repeat the exact phrase.")
-                    tts.speak("Voice enrollment failed. Please try again.")
-                    return@launch
-                }
-                voiceAuth.setEnabled(true)
-                voiceAuthStatus.text = voiceAuthStatusText()
-                toast("Neural voice enrolled and voice lock enabled.")
-                tts.speak("Voice enrollment complete. Voice lock is now enabled.")
-            } catch (e: Exception) {
-                android.util.Log.e("JarvisSettings", "Voice enrollment failed", e)
-                toast("Voice enrollment failed: ${e.message ?: "unknown error"}")
-            } finally {
-                if (wakePaused) {
-                    try {
-                        val resumeIntent = Intent(this@SettingsActivity, com.jarvis.assistant.service.AssistantForegroundService::class.java).apply {
-                            action = com.jarvis.assistant.service.AssistantForegroundService.ACTION_RESUME_WAKE_AFTER_EXTERNAL_MIC
-                        }
-                        ContextCompat.startForegroundService(this@SettingsActivity, resumeIntent)
-                        android.util.Log.i("JarvisSettings", "Requested background wake resume after voice enrollment")
-                    } catch (e: Exception) {
-                        android.util.Log.e("JarvisSettings", "Could not resume background wake after enrollment", e)
-                    }
-                }
+            val samples = mutableListOf<ShortArray>()
+            repeat(3) { i ->
+                toast("Sample ${i + 1} of 3 — speak now…")
+                val sample = withContext(Dispatchers.IO) { voiceAuth.captureSample(1800) }
+                if (sample != null) samples.add(sample)
             }
+            if (samples.size < 2) {
+                toast("Didn't capture enough audio — try again somewhere quieter.")
+                return@launch
+            }
+            voiceAuth.enrollFromSamples(samples)
+            voiceAuth.setEnabled(true)
+            voiceAuthStatus.text = voiceAuthStatusText()
+            toast("Voice enrolled and voice lock enabled.")
         }
     }
 
