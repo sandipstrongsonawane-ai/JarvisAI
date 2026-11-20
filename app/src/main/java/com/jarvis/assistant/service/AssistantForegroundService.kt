@@ -184,12 +184,14 @@ class AssistantForegroundService : Service() {
             }
             return START_STICKY
         }
-        // Siri-style: on-device KWS only (not continuous Google STT).
-        try { stt.stopContinuous() } catch (_: Exception) {}
-        startWakeWordListening()
+        // Match the original manual-Listen ownership flow:
+        // a manual Listen action takes the mic directly; standby starts background wake.
         val action = intent?.action
+        try { stt.stopContinuous() } catch (_: Exception) {}
         if (action == com.jarvis.assistant.widget.JarvisWidgetActionReceiver.ACTION_START_LISTENING) {
             startListeningCycle()
+        } else {
+            startWakeWordListening()
         }
         return START_STICKY
     }
