@@ -601,7 +601,7 @@ class SettingsActivity : AppCompatActivity() {
             }
             val enrolled = voiceAuth.enrollFromSamples(samples)
             if (!enrolled) {
-                toast("Voice samples did not match reliably. Keep the phone 15–20 cm away and repeat the exact phrase.")
+                toast(voiceAuth.lastEnrollmentFailureReason() ?: "Voice samples did not match reliably. Keep the phone 15–20 cm away and repeat the exact phrase.")
 
                 tts.speak("Voice enrollment failed. Please try again.")
                 return@launch
