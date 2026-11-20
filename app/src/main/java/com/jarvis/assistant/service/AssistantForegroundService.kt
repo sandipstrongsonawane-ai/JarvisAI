@@ -222,20 +222,31 @@ class AssistantForegroundService : Service() {
         try {
             val detector = com.jarvis.assistant.voice.OpenWakeWordEngine(applicationContext)
             openWake = detector
-            val started = detector.start {
-                mainHandler.post {
-                    if (!listenCycleRunning && !externalMicSessionActive) {
-                        android.util.Log.i("JarvisService", "Hey Jarvis detected by on-device KWS")
-                        // Restore the original wake-to-listen handoff: stop KWS,
-                        // publish the listening HUD/edge indicator, then open command STT.
-                        try { openWake?.stop() } catch (_: Exception) {}
-                        try { porcupine.stop() } catch (_: Exception) {}
-                        try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
-                        try { com.jarvis.assistant.ui.ActivationEdgeOverlay.show(this@AssistantForegroundService) } catch (_: Exception) {}
-                        startListeningCycle()
+            val started = detector.start(
+                onWake = {
+                    mainHandler.post {
+                        if (!listenCycleRunning && !externalMicSessionActive) {
+                            android.util.Log.i("JarvisService", "Hey Jarvis detected by on-device KWS")
+                            try { openWake?.stop() } catch (_: Exception) {}
+                            try { porcupine.stop() } catch (_: Exception) {}
+                            try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
+                            try { com.jarvis.assistant.ui.ActivationEdgeOverlay.show(this@AssistantForegroundService) } catch (_: Exception) {}
+                            startListeningCycle()
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    mainHandler.post {
+                        if (openWake === detector) {
+                            try { detector.stop() } catch (_: Exception) {}
+                            openWake = null
+                            try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
+                            android.util.Log.e("JarvisService", "OpenWakeWord stream died after startup; retrying", error)
+                            scheduleWakeResumeRetry()
+                        }
                     }
                 }
-            }
+            )
             if (started) {
                 wakeResumeRetryAttempt = 0
                 wakeResumeRetryPosted = false
