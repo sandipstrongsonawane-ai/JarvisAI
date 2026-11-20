@@ -334,6 +334,10 @@ class SettingsActivity : AppCompatActivity() {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 setSingleLine(true)
             }
+            val elevenLabsVoiceIdInput = hudEditText(settings.getElevenLabsVoiceId()).apply {
+                hint = "ElevenLabs female voice ID"
+                setSingleLine(true)
+            }
             val weatherInput = hudEditText(settings.getOpenWeatherApiKey()).apply {
                 hint = "OpenWeather API key"
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -343,8 +347,10 @@ class SettingsActivity : AppCompatActivity() {
             addView(groqInput)
             addView(bodyText("GEMINI"))
             addView(geminiInput)
-            addView(bodyText("ELEVENLABS — FEMALE VOICE"))
+            addView(bodyText("ELEVENLABS — FEMALE VOICE API KEY"))
             addView(elevenLabsInput)
+            addView(bodyText("ELEVENLABS VOICE ID"))
+            addView(elevenLabsVoiceIdInput)
             addView(bodyText("OPENWEATHER"))
             addView(weatherInput)
             var keysVisible = false
@@ -367,9 +373,15 @@ class SettingsActivity : AppCompatActivity() {
             addView(hudButton("SAVE API KEYS", filled = true) {
                 settings.setGroqApiKey(groqInput.text.toString().trim())
                 settings.setGeminiApiKey(geminiInput.text.toString().trim())
-                settings.setElevenLabsApiKey(elevenLabsInput.text.toString().trim())
-                settings.setOpenWeatherApiKey(weatherInput.text.toString().trim())
-                toast("API keys saved securely on this phone.")
+                val voiceId = elevenLabsVoiceIdInput.text.toString().trim()
+                if (!voiceId.matches(Regex("^[A-Za-z0-9_-]{8,64}$"))) {
+                    toast("Enter a valid ElevenLabs voice ID.")
+                } else {
+                    settings.setElevenLabsApiKey(elevenLabsInput.text.toString().trim())
+                    settings.setElevenLabsVoiceId(voiceId)
+                    settings.setOpenWeatherApiKey(weatherInput.text.toString().trim())
+                    toast("API keys and voice ID saved securely on this phone.")
+                }
             })
             addView(hudButton("TEST GROQ CONNECTION") {
                 testCloudKey("Groq", groqInput.text.toString().trim())
