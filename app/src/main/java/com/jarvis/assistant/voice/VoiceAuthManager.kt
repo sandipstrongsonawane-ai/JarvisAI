@@ -129,7 +129,7 @@ class VoiceAuthManager(private val context: Context) {
         for (i in vectors.indices) {
             for (j in i + 1 until vectors.size) {
                 val similarity = cosineSimilarity(vectors[i], vectors[j])
-                android.util.Log.i("JarvisVoiceAuth", "Enrollment similarity sample ${i + 1}-${j + 1}=$similarity threshold=$threshold")
+                android.util.Log.i("JarvisVoiceAuth", "Enrollment similarity sample ${i + 1}-${j + 1}=$similarity threshold=$enrollmentThreshold")
                 if (similarity < enrollmentThreshold) {
                     lastEnrollmentFailure = "Samples differ too much (similarity $similarity). Keep the same distance and speak naturally for each sample."
                     return@withContext false
