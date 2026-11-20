@@ -6,6 +6,7 @@ import android.util.Log
 import com.rementia.openwakeword.lib.WakeWordEngine
 import com.rementia.openwakeword.lib.model.DetectionMode
 import com.rementia.openwakeword.lib.model.WakeWordModel
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +33,9 @@ class OpenWakeWordEngine(private val context: Context) {
     private var scoreJob: Job? = null
     private var watchdogJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Keep the library's inference dispatcher (Default), but surface failures from
+    // its private AudioRecord coroutine instead of silently losing them.
+    private var recordingScope: CoroutineScope? = null
     @Volatile private var stopping = true
     @Volatile private var lastScoreAtMs = 0L
 
@@ -61,13 +65,21 @@ class OpenWakeWordEngine(private val context: Context) {
                     threshold = 0.10f
                 )
             )
-            // Use the same default-scope engine construction as the known
-            // working mic branch; do not inject a replacement AudioRecord scope.
+            val audioFailureHandler = CoroutineExceptionHandler { _, error ->
+                reportFailure(error)
+            }
+            // Match the library's documented Default dispatcher. A SupervisorJob +
+            // handler makes AudioRecord startup/read failures visible to the service.
+            val audioScope = CoroutineScope(
+                SupervisorJob() + Dispatchers.Default + audioFailureHandler
+            )
+            recordingScope = audioScope
             val eng = WakeWordEngine(
                 context = context.applicationContext,
                 models = models,
                 detectionMode = DetectionMode.SINGLE_BEST,
-                detectionCooldownMs = 1500L
+                detectionCooldownMs = 1500L,
+                scope = audioScope
             )
             engine = eng
 
@@ -124,6 +136,8 @@ class OpenWakeWordEngine(private val context: Context) {
             try { engine?.stop() } catch (_: Exception) {}
             try { engine?.release() } catch (_: Exception) {}
             engine = null
+            recordingScope?.cancel()
+            recordingScope = null
             Log.e(TAG, "start failed: ${e.message}", e)
             false
         }
@@ -135,6 +149,8 @@ class OpenWakeWordEngine(private val context: Context) {
         try { engine?.stop() } catch (_: Exception) {}
         try { engine?.release() } catch (_: Exception) {}
         engine = null
+        recordingScope?.cancel()
+        recordingScope = null
         lastScoreAtMs = 0L
     }
 
@@ -149,8 +165,8 @@ class OpenWakeWordEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "OpenWakeWord"
-        private const val INITIAL_AUDIO_TIMEOUT_MS = 8_000L
-        private const val STALE_SCORE_TIMEOUT_MS = 3_000L
+        private const val INITIAL_AUDIO_TIMEOUT_MS = 30_000L
+        private const val STALE_SCORE_TIMEOUT_MS = 5_000L
         private const val WATCHDOG_INTERVAL_MS = 1_000L
     }
 }
