@@ -93,7 +93,6 @@ class MainActivity : AppCompatActivity(),
                 pendingListen = false
                 service?.startListeningCycle()
             }
-            bound = true
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             service = null
