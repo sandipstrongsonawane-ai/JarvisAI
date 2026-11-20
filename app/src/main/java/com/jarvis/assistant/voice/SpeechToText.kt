@@ -24,6 +24,15 @@ class SpeechToText(private val context: Context) {
         stopInternal()
     }
 
+    private fun stopInternal() {
+        try {
+            recognizer?.cancel()
+            recognizer?.destroy()
+        } catch (_: Exception) {
+        }
+        recognizer = null
+    }
+
     private fun simpleListener(onResult: (String) -> Unit, onError: () -> Unit) =
         object : RecognitionListener {
             override fun onResults(results: Bundle?) {
