@@ -1,6 +1,8 @@
 package com.jarvis.assistant
 
 import android.content.Intent
+import android.content.ComponentName
+import android.provider.Settings
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,6 +21,8 @@ class RuntimePermissionActivity : AppCompatActivity() {
         const val EXTRA_MESSAGE = "jarvis.permission.message"
         const val EXTRA_PERMISSIONS = "jarvis.permission.permissions"
         const val EXTRA_COMMAND_JSON = "jarvis.permission.command_json"
+        const val EXTRA_SPECIAL_ACCESS = "jarvis.permission.special_access"
+        private const val REQUEST_SPECIAL_ACCESS = 9201
     }
 
     private val permissionLauncher = registerForActivityResult(
@@ -43,6 +47,21 @@ class RuntimePermissionActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val specialAccess = intent.getStringExtra(EXTRA_SPECIAL_ACCESS)
+        if (!specialAccess.isNullOrBlank()) {
+            val settingsIntent = when (specialAccess) {
+                "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                "notification_listener" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                else -> null
+            }
+            if (settingsIntent == null) {
+                Toast.makeText(this, "Unsupported special permission request.", Toast.LENGTH_LONG).show()
+                finish()
+            } else {
+                startActivityForResult(settingsIntent, REQUEST_SPECIAL_ACCESS)
+            }
+            return
+        }
         val requested = intent.getStringArrayListExtra(EXTRA_PERMISSIONS).orEmpty()
         val missing = requested.filter {
             ContextCompat.checkSelfPermission(this, it) !=
@@ -52,6 +71,45 @@ class RuntimePermissionActivity : AppCompatActivity() {
             resumePendingCommand()
         } else {
             permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    @Deprecated("Use Activity Result APIs; retained for system Settings return flow")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_SPECIAL_ACCESS) return
+        val kind = intent.getStringExtra(EXTRA_SPECIAL_ACCESS).orEmpty()
+        val granted = when (kind) {
+            "accessibility" -> {
+                val enabled = Settings.Secure.getString(
+                    contentResolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                ).orEmpty()
+                val component = ComponentName(
+                    this,
+                    com.jarvis.assistant.accessibility.JarvisAccessibilityService::class.java
+                ).flattenToString()
+                enabled.split(':').any { it.equals(component, ignoreCase = true) } ||
+                    com.jarvis.assistant.accessibility.JarvisAccessibilityService.instance != null
+            }
+            "notification_listener" -> {
+                val enabled = Settings.Secure.getString(
+                    contentResolver,
+                    "enabled_notification_listeners"
+                ).orEmpty()
+                val component = ComponentName(
+                    this,
+                    com.jarvis.assistant.notifications.JarvisNotificationListener::class.java
+                ).flattenToString()
+                enabled.split(':').any { it.equals(component, ignoreCase = true) }
+            }
+            else -> false
+        }
+        if (granted) {
+            resumePendingCommand()
+        } else {
+            Toast.makeText(this, "Access was not enabled. Jarvis did not run the action.", Toast.LENGTH_LONG).show()
+            finish()
         }
     }
 
