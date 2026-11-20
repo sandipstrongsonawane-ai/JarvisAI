@@ -589,34 +589,6 @@ class AssistantForegroundService : Service() {
         command: com.jarvis.assistant.model.AssistantCommand,
         confirmed: Boolean = false
     ): String {
-        val requiredPermissions = requiredRuntimePermissions(command)
-        val missingPermissions = requiredPermissions.filter {
-            androidx.core.content.ContextCompat.checkSelfPermission(this, it) !=
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        }
-        if (missingPermissions.isNotEmpty()) {
-            return try {
-                val request = Intent(this, com.jarvis.assistant.RuntimePermissionActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_ACTION, command.action)
-                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_TARGET, command.target)
-                    putExtra(com.jarvis.assistant.RuntimePermissionActivity.EXTRA_MESSAGE, command.message)
-                    putExtra(
-                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_COMMAND_JSON,
-                        commandToJson(command).toString()
-                    )
-                    putStringArrayListExtra(
-                        com.jarvis.assistant.RuntimePermissionActivity.EXTRA_PERMISSIONS,
-                        ArrayList(missingPermissions)
-                    )
-                }
-                startActivity(request)
-                "Jarvis needs permission to complete this action. Please allow the requested access; I'll retry it automatically."
-            } catch (e: Exception) {
-                android.util.Log.e("JarvisService", "Could not open permission request", e)
-                "Permission is required. Open Jarvis and retry this action."
-            }
-        }
         if (command.action == "pc_connect") {
             return when (command.target?.trim()?.lowercase()) {
                 "on", "start", "enable", "connect" -> pcBridge.start()
@@ -624,23 +596,9 @@ class AssistantForegroundService : Service() {
                 else -> "Say connect PC or disconnect PC."
             }
         }
+        // CommandExecutor owns the permission preflight so offline, Groq, Gemini,
+        // and deferred actions all follow the same permission + retry path.
         return if (confirmed) executor.executeConfirmed(command) else executor.execute(command)
-    }
-
-    private fun commandToJson(command: com.jarvis.assistant.model.AssistantCommand): org.json.JSONObject {
-        val json = org.json.JSONObject()
-            .put("action", command.action)
-            .put("target", command.target)
-            .put("message", command.message)
-        val extra = org.json.JSONObject()
-        command.extra.forEach { (key, value) -> extra.put(key, value) }
-        json.put("extra", extra)
-        command.steps?.let { steps ->
-            val array = org.json.JSONArray()
-            steps.forEach { array.put(commandToJson(it)) }
-            json.put("steps", array)
-        }
-        return json
     }
 
     private fun commandFromJson(json: org.json.JSONObject): com.jarvis.assistant.model.AssistantCommand {
