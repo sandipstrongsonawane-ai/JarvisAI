@@ -33,6 +33,7 @@ class CommandExecutor(private val context: Context) {
         return try {
             when (ActionType.fromKey(cmd.action)) {
             ActionType.OPEN_APP -> openApp(cmd.target)
+            ActionType.NAVIGATE -> navigate(cmd.target, cmd.message)
             ActionType.CLOSE_APP -> closeApp(cmd.target)
             ActionType.CLEAR_RECENTS -> clearRecents()
             ActionType.UNINSTALL_APP -> uninstallApp(cmd.target)
@@ -292,6 +293,40 @@ class CommandExecutor(private val context: Context) {
             "Play Store search open hai for $name. Install wahan se, sir."
         } catch (e: Exception) {
             "Couldn't open Play Store: ${e.message}"
+        }
+    }
+
+    /** Opens Google Maps directly into a destination route; no location permission is needed for a typed destination. */
+    private fun navigate(destination: String?, modeHint: String?): String {
+        val place = destination?.trim().orEmpty()
+        if (place.isBlank()) return "Where should I navigate to?"
+        val mode = when (modeHint?.lowercase()?.trim()) {
+            "walk", "walking", "pedestrian" -> "w"
+            "bike", "bicycle", "cycling" -> "b"
+            "transit", "bus", "train" -> "r"
+            else -> "d"
+        }
+        val navigationUri = Uri.parse("google.navigation:q=" + Uri.encode(place) + "&mode=$mode")
+        val mapsIntent = Intent(Intent.ACTION_VIEW, navigationUri).apply {
+            setPackage("com.google.android.apps.maps")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            if (mapsIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(mapsIntent)
+                "Starting Google Maps navigation to $place."
+            } else {
+                val webUri = Uri.parse(
+                    "https://www.google.com/maps/dir/?api=1&destination=" + Uri.encode(place) +
+                        "&travelmode=" + when (mode) { "w" -> "walking"; "b" -> "bicycling"; "r" -> "transit"; else -> "driving" }
+                )
+                val webIntent = Intent(Intent.ACTION_VIEW, webUri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(webIntent)
+                "Opening route directions to $place."
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("JarvisCommandExecutor", "Navigation launch failed for $place", e)
+            "Couldn't start navigation to $place: ${e.message ?: "no Maps handler found"}."
         }
     }
 
@@ -707,30 +742,25 @@ private fun setAlarm(target: String?): String {
                 return "Spotify doesn't appear to be installed, sir."
             }
             "youtube music" in hint || "yt music" in hint -> {
-                val i = Intent(Intent.ACTION_SEARCH).apply {
+                val searchUri = Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(q))
+                val appSearch = Intent(Intent.ACTION_VIEW, searchUri).apply {
                     setPackage("com.google.android.apps.youtube.music")
-                    putExtra("query", q)
                 }
-                if (tryStart(i)) return "Opening YouTube Music for $q."
-                val v = Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(q))
-                ).apply { setPackage("com.google.android.apps.youtube.music") }
-                if (tryStart(v)) return "Opening YouTube Music for $q."
-                return "YouTube Music doesn't appear to be installed, sir."
+                if (tryStart(appSearch)) return "Opened YouTube Music results for $q. Select a track to play."
+                if (tryStart(Intent(Intent.ACTION_VIEW, searchUri))) {
+                    return "Opened YouTube Music results for $q. Select a track to play."
+                }
+                return "Couldn't open YouTube Music search for $q."
             }
             "youtube" in hint && "music" !in hint -> {
-                val play = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                val searchUri = Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q))
+                val appSearch = Intent(Intent.ACTION_VIEW, searchUri).apply {
                     setPackage("com.google.android.youtube")
-                    putExtra(SearchManager.QUERY, q)
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio")
                 }
-                if (tryStart(play)) return "Playing $q on YouTube."
-                val search = Intent(Intent.ACTION_SEARCH).apply {
-                    setPackage("com.google.android.youtube")
-                    putExtra("query", q)
-                }
-                if (tryStart(search)) return "Searching YouTube for $q — tap the first result to play."
+                if (tryStart(appSearch)) return "Opened YouTube results for $q. Select a result to start playback."
+                val browserSearch = Intent(Intent.ACTION_VIEW, searchUri)
+                if (tryStart(browserSearch)) return "Opened YouTube results for $q. Select a result to start playback."
+                return "Couldn't open YouTube search for $q."
             }
         }
 
