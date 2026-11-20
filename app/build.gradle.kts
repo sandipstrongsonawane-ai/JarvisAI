@@ -54,11 +54,6 @@ android {
         noCompress += "onnx"
     }
     packaging {
-        jniLibs {
-            // sherpa-onnx uses ONNX Runtime in the APK.
-            // Keep one shared runtime copy instead of failing native merge.
-            pickFirsts += "**/libonnxruntime.so"
-        }
         resources {
             // The sherpa AAR also ships desktop ONNX runtimes; Android never loads these.
             excludes += "sherpa-onnx/native/**"
@@ -79,7 +74,6 @@ android {
 dependencies {
     implementation("xyz.rementia:openwakeword:0.1.5")
     implementation("ai.picovoice:porcupine-android:3.0.3")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
     implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
         // The Android AAR already contains the sherpa JVM API classes.
         // Exclude the separately published JVM JAR to prevent duplicate classes.
