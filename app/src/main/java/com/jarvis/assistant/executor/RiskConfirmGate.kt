@@ -24,7 +24,7 @@ object RiskConfirmGate {
         return l in setOf(
             "yes", "yeah", "yep", "confirm", "do it", "proceed", "go ahead",
             "ha", "haan", "han", "kar do", "karo", "ok", "okay"
-        ) || l.startsWith("yes ") || l.startsWith("confirm")
+        )
     }
 
     fun isCancelSpeech(speech: String): Boolean {
