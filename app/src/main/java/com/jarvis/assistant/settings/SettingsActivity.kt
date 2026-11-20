@@ -370,12 +370,13 @@ class SettingsActivity : AppCompatActivity() {
                 weatherInput.setSelection(weatherInput.text.length)
             })
             addView(hudButton("SAVE API KEYS", filled = true) {
-                settings.setGroqApiKey(groqInput.text.toString().trim())
-                settings.setGeminiApiKey(geminiInput.text.toString().trim())
                 val voiceId = elevenLabsVoiceIdInput.text.toString().trim()
                 if (!voiceId.matches(Regex("^[A-Za-z0-9_-]{8,64}$"))) {
-                    toast("Enter a valid ElevenLabs voice ID.")
+                    toast("Invalid ElevenLabs voice ID. No API keys were changed.")
                 } else {
+                    // Validate every field before writing any provider setting.
+                    settings.setGroqApiKey(groqInput.text.toString().trim())
+                    settings.setGeminiApiKey(geminiInput.text.toString().trim())
                     settings.setElevenLabsApiKey(elevenLabsInput.text.toString().trim())
                     settings.setElevenLabsVoiceId(voiceId)
                     settings.setOpenWeatherApiKey(weatherInput.text.toString().trim())
