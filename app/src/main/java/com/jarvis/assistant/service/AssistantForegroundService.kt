@@ -923,6 +923,19 @@ class AssistantForegroundService : Service() {
             }
         }
 
+        val deleteMatch = Regex(
+            "^(?:delete task|remove task|task delete|task hatao|kaam hatao)\\s*[:,-]?\\s*(.+)$",
+            RegexOption.IGNORE_CASE
+        ).find(text)
+        if (deleteMatch != null) {
+            val result = manager.delete(deleteMatch.groupValues[1].trim())
+            return when {
+                result.task != null -> "Deleted pending task: ${result.task.title}."
+                result.ambiguous -> "Ek se zyada tasks match hue. Number se batao, jaise: delete task 1."
+                else -> "Matching pending task nahi mila. My tasks bolo to list dekh sakte ho."
+            }
+        }
+
         if (lower in setOf("clear completed tasks", "delete completed tasks", "completed tasks saaf karo")) {
             val removed = manager.clearCompleted()
             return "Completed tasks mein se ${removed} remove kiye."
