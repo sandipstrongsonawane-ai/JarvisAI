@@ -76,6 +76,12 @@ class OfflineBrain(
             )
         }
 
+        // Catch a complete spoken chain before any single-action keyword handler can
+        // execute only its first clause and silently drop the remaining actions.
+        if (com.jarvis.assistant.util.CommandChainSplitter.looksLikeChain(text)) {
+            return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", text))
+        }
+
         if (containsAny(cmd, "who is this", "identify person", "identify face", "who is that", "chehra pehchano")) {
             return try {
                 val i = android.content.Intent(context, com.jarvis.assistant.vision.VisionActivity::class.java)
@@ -356,9 +362,7 @@ class OfflineBrain(
                 .ifBlank { text }
             return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", task))
         }
-        if (com.jarvis.assistant.util.CommandChainSplitter.looksLikeChain(text)) {
-            return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", text))
-        }
+
 
         // Siri-style on-screen awareness
         if (containsAny(
