@@ -519,6 +519,17 @@ class AssistantForegroundService : Service() {
                         android.util.Log.i("JarvisService", "STT result: [$s] echo=$echo")
                         if (s.isNotBlank() && !echo) {
                             handleUserSpeech(s)
+                        } else if (!retry) {
+                            // Empty/echo recognition is common right after wake. Retry once
+                            // while keeping this command session alive before returning to standby.
+                            listenCycleRunning = true
+                            android.util.Log.w("JarvisService", "STT blank/echo result — retrying once")
+                            val sessionStartedAt = lastListenCycleMs
+                            mainHandler.postDelayed({
+                                if (listenCycleRunning && lastListenCycleMs == sessionStartedAt) {
+                                    beginStt(retry = true)
+                                }
+                            }, 450L)
                         } else {
                             try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
                             try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
