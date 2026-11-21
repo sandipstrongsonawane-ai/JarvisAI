@@ -159,7 +159,7 @@ class MultiStepExecutor(
             "couldn't", "could not", "can't", "cannot", "failed", "unable", "not found",
             "not installed", "doesn't appear", "does not appear", "no compatible app",
             "permission", "denied", "i didn't understand", "unknown", "unknown setting", "error",
-            "which application", "which app", "no number",
+            "which application", "which app", "no number", "must be greater than zero",
             // A held risky action is awaiting user confirmation, not a completed step.
             "say confirm or cancel", "confirmation required",
             // These responses hand control to the user; the next chain step must wait.
