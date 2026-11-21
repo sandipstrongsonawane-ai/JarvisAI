@@ -165,7 +165,10 @@ class MultiStepExecutor(
             // These responses hand control to the user; the next chain step must wait.
             "select the contact in the app", "select a contact in the app",
             "choose a contact in the app", "tap send to send it",
-            "delivery is not verified"
+            "delivery is not verified",
+            // Permission flows suspend the action until the user grants access and returns.
+            "i'll retry the action when you return", "i'll retry automatically",
+            "grant it from the permission prompt", "permission/notification"
         )
         return keys.any { l.contains(it) }
     }
