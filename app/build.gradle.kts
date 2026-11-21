@@ -54,6 +54,11 @@ android {
         noCompress += "onnx"
     }
     packaging {
+        jniLibs {
+            // Voicute and sherpa-onnx both bundle ONNX Runtime native libraries.
+            // Keep a single compatible runtime copy in the APK.
+            pickFirsts += "**/libonnxruntime.so"
+        }
         resources {
             // The sherpa AAR also ships desktop ONNX runtimes; Android never loads these.
             excludes += "sherpa-onnx/native/**"
@@ -72,12 +77,7 @@ android {
 }
 
 dependencies {
-    implementation("xyz.rementia:openwakeword:0.1.5") {
-        // Sherpa-ONNX supplies the native ONNX Runtime used by CAM++.
-        // Do not package OpenWakeWord's older transitive ONNX Runtime native library.
-        exclude(group = "com.microsoft.onnxruntime", module = "onnxruntime-android")
-    }
-    implementation("ai.picovoice:porcupine-android:3.0.3")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
     implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1") {
         // The Android AAR bundles its matching ONNX Runtime native library.
         // Exclude the transitive standalone runtime AAR to avoid duplicate libonnxruntime.so.
@@ -247,7 +247,56 @@ val downloadVoiceChallengeAsrModel by tasks.registering {
 }
 
 
+// Pinned Voicute offline Hey Jarvis models. Downloads are verified by exact
+// upstream Git blob SHA-1 and size before they enter the APK assets.
+val voicuteWakeAssets = layout.projectDirectory.dir("src/main/assets/voicute")
+val downloadVoicuteWakeAssets by tasks.registering {
+    outputs.dir(voicuteWakeAssets)
+    doLast {
+        val assetsDir = voicuteWakeAssets.asFile
+        assetsDir.mkdirs()
+        fun gitBlobSha1(file: java.io.File): String {
+            val digest = MessageDigest.getInstance("SHA-1")
+            digest.update("blob ${file.length()}\\u0000".toByteArray(Charsets.UTF_8))
+            file.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+        fun fetchPinned(name: String, size: Long, blobSha: String) {
+            val target = assetsDir.resolve(name)
+            if (target.exists() && target.length() == size && gitBlobSha1(target) == blobSha) return
+            val temp = target.resolveSibling(target.name + ".part")
+            try {
+                val modelPath = if (name == "heyjarvis_r1.onnx") "en/" else ""
+                URL("https://raw.githubusercontent.com/voicute/onnx-wakeword/main/models/" + modelPath + name)
+                    .openStream().use { input ->
+                        temp.outputStream().use { output -> input.copyTo(output) }
+                    }
+                check(temp.length() == size) { "Voicute asset size mismatch: $name" }
+                check(gitBlobSha1(temp) == blobSha) { "Voicute asset Git SHA-1 mismatch: $name" }
+                check(temp.renameTo(target)) { "Could not install Voicute asset: $name" }
+            } finally {
+                if (temp.exists()) temp.delete()
+            }
+        }
+        fetchPinned("melspectrogram.onnx", 1087958L, "a3a60354eebe5fa4c7c9534851e4cb0bd7b0d06c")
+        fetchPinned("heyjarvis_r1.onnx", 130572L, "d5cb71e1bde0513627576df668d66fddea557b64")
+        val config = assetsDir.resolve("model_info.json")
+        check(config.exists() && config.readText().contains("\\\"Hey Jarvis\\\"")) {
+            "Voicute model_info.json is missing or does not configure Hey Jarvis"
+        }
+    }
+}
+
+
 tasks.named("preBuild").configure {
+    dependsOn(downloadVoicuteWakeAssets)
     dependsOn(downloadSpeakerModel)
     dependsOn(downloadVoiceChallengeAsrModel)
 }
