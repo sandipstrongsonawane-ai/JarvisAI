@@ -873,19 +873,40 @@ class AssistantForegroundService : Service() {
         val manager = com.jarvis.assistant.util.TaskListManager(this)
 
         val addMatch = Regex(
-            "^(?:add task|task add|add a task|task jodo|kaam add karo)\\s*[:,-]?\\s*(.+)$",
+            "^(?:add task|task add|add a task|task jodo|kaam add karo)\\s*[:,-]?\\s*(?:(today|tomorrow)\\s+)?(?:(high|normal|low)\\s+)?(.+)$",
             RegexOption.IGNORE_CASE
         ).find(text)
         if (addMatch != null) {
-            val title = addMatch.groupValues[1].trim()
-            val task = manager.add(title) ?: return "Task ka naam batao, phir main add kar dunga."
-            return if (task.title.equals(title, true)) "Task added: ${task.title}." else "Ye task pehle se pending hai: ${task.title}."
+            val dueLabel = addMatch.groupValues[1].lowercase()
+            val priority = addMatch.groupValues[2].lowercase().ifBlank { "normal" }
+            val title = addMatch.groupValues[3].trim()
+            val dueAt = when (dueLabel) {
+                "today" -> java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 23); set(java.util.Calendar.MINUTE, 59)
+                    set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                "tomorrow" -> java.util.Calendar.getInstance().apply {
+                    add(java.util.Calendar.DAY_OF_YEAR, 1); set(java.util.Calendar.HOUR_OF_DAY, 23)
+                    set(java.util.Calendar.MINUTE, 59); set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                else -> null
+            }
+            val task = manager.add(title, dueAt, priority) ?: return "Task ka naam batao, phir main add kar dunga."
+            val dueText = when (dueLabel) { "today" -> " due today"; "tomorrow" -> " due tomorrow"; else -> "" }
+            val priorityText = if (priority == "normal") "" else ", $priority priority"
+            return if (task.title.equals(title, true)) "Task added: ${task.title}$dueText$priorityText." else "Ye task pehle se pending hai: ${task.title}."
         }
 
         if (lower in setOf("my tasks", "show tasks", "list tasks", "pending tasks", "mere tasks", "mere pending tasks", "tasks dikhao", "kaam dikhao")) {
             val pending = manager.pending()
             if (pending.isEmpty()) return "Abhi koi pending task nahi hai."
-            return "Pending tasks: " + pending.take(10).mapIndexed { index, task -> "${index + 1}. ${task.title}" }.joinToString("; ")
+            val dateFormat = java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault())
+            return "Pending tasks: " + pending.take(10).mapIndexed { index, task ->
+                val due = task.dueAt?.let { " (due ${dateFormat.format(java.util.Date(it))})" }.orEmpty()
+                val priority = if (task.priority == "normal") "" else " [${task.priority} priority]"
+                "${index + 1}. ${task.title}$due$priority"
+            }.joinToString("; ")
         }
 
         val completeMatch = Regex(
