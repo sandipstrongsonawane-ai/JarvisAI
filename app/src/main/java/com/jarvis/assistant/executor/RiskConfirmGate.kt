@@ -52,10 +52,22 @@ object RiskConfirmGate {
             ActionType.SET_PIN,
             ActionType.UNLOCK_PHONE -> true
             ActionType.MULTI_STEP -> cmd.steps.orEmpty().any { isRisky(it) }
+            ActionType.AGENT_TASK -> isRiskyAgentTask(cmd.target ?: cmd.message.orEmpty())
             else -> {
                 val a = cmd.action.lowercase()
                 a.contains("delete") || a.contains("wipe")
             }
+        }
+    }
+
+    private fun isRiskyAgentTask(task: String): Boolean {
+        val text = task.lowercase()
+        val riskyVerbs = listOf(
+            "call", "dial", "send", "message", "text", "whatsapp", "sms",
+            "telegram", "uninstall", "delete", "remove", "set pin", "unlock"
+        )
+        return riskyVerbs.any { verb ->
+            Regex("""\\b${Regex.escape(verb)}\\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)
         }
     }
 
@@ -68,6 +80,8 @@ object RiskConfirmGate {
         return when (type) {
             ActionType.CALL ->
                 "Call ${cmd.target ?: "this number"}? Say confirm or cancel."
+            ActionType.AGENT_TASK ->
+                "This task may send a message, place a call, or change something important: ${(cmd.target ?: cmd.message).orEmpty().take(180)}. Say confirm or cancel."
             ActionType.MULTI_STEP -> {
                 val details = cmd.steps.orEmpty().take(5).mapIndexed { index, step ->
                     val stepType = ActionType.fromKey(step.action)
