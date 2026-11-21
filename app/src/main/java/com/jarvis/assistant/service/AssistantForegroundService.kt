@@ -79,6 +79,8 @@ class AssistantForegroundService : Service() {
     private var wakeRetryAttempt = 0
     private var wakeRetryPosted = false
     private var wakeStartGeneration = 0
+    // Invalidates delayed mic-release/rearm callbacks when a newer session takes ownership.
+    private var wakeResumeGeneration = 0
     @Volatile private var wakeStartInProgress = false
     private var wakeCpuLock: android.os.PowerManager.WakeLock? = null
     private val wakeRetryRunnable = Runnable {
@@ -145,6 +147,7 @@ class AssistantForegroundService : Service() {
         when (intent?.action) {
             ACTION_PAUSE_WAKE_FOR_EXTERNAL_MIC -> {
                 externalMicSessionActive = true
+                wakeResumeGeneration++
                 wakeStartGeneration++
                 listenCycleRunning = false
                 releaseAllMics()
@@ -359,12 +362,16 @@ class AssistantForegroundService : Service() {
     }
 
     private fun resumeWakeSoon(delayMs: Long = 1800L) {
+        val generation = ++wakeResumeGeneration
         mainHandler.postDelayed({
+            // A newer manual/STT/external-mic session owns the microphone now.
+            if (generation != wakeResumeGeneration || externalMicSessionActive || listenCycleRunning) return@postDelayed
             try {
                 // Critical: Google STT must be fully stopped before the wake detector reacquires AudioRecord
                 forceReleaseCommandMic()
                 // Small gap so AudioRecord is free
                 mainHandler.postDelayed({
+                    if (generation != wakeResumeGeneration || externalMicSessionActive || listenCycleRunning) return@postDelayed
                     try {
                         startWakeWordListening()
                         android.util.Log.i("JarvisService", "Hey Jarvis wake armed")
@@ -384,6 +391,7 @@ class AssistantForegroundService : Service() {
 
     private fun startFollowUpListen() {
         if (externalMicSessionActive) return
+        wakeResumeGeneration++
         mainHandler.postDelayed({
             if (externalMicSessionActive) return@postDelayed
             if (listenCycleRunning) return@postDelayed
@@ -444,6 +452,7 @@ class AssistantForegroundService : Service() {
             listener?.onStateChanged(BrainState.ERROR)
             return
         }
+        wakeResumeGeneration++ // invalidate any stale delayed standby re-arm
         val now = System.currentTimeMillis()
         // Allow re-tap after 1.5s (old 8s gate blocked reactor retries)
         if (listenCycleRunning && now - lastListenCycleMs < 1500L) {
