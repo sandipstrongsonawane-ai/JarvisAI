@@ -37,4 +37,12 @@ class CommandChainSplitterTest {
             CommandChainSplitter.split("call Rahul and text Amit")
         )
     }
+    @Test
+    fun splitsDeviceActionsThatUsePlainAndConnector() {
+        assertEquals(
+            listOf("set alarm for 7 am", "increase volume", "open Maps"),
+            CommandChainSplitter.split("set alarm for 7 am and increase volume aur open Maps")
+        )
+    }
+
 }
