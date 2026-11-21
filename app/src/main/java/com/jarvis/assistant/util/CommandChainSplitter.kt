@@ -16,7 +16,7 @@ object CommandChainSplitter {
         Regex("""\s+plus\s+""", RegexOption.IGNORE_CASE),
         // "call X and text Y" / "message A and remind me"
         Regex("""\s+and\s+(?=call\b|dial\b|text\b|message\b|sms\b|whatsapp\b|open\b|set\b|remind\b|turn\b|enable\b|disable\b|search\b|play\b|navigate\b|torch\b|flashlight\b|volume\b|wifi\b|bluetooth\b|mute\b|pause\b|resume\b|screenshot\b|read\b|check\b|find\b|close\b|install\b|uninstall\b|lock\b|unlock\b|alarm\b|timer\b|stop\b|start\b|increase\b|decrease\b)""", RegexOption.IGNORE_CASE),
-        Regex("""\s+aur\s+(?=call\b|text\b|message\b|sms\b|kholo\b|set\b|yaad\b|chalao\b|karo\b|search\b|volume\b|awaaz\b|wifi\b|bluetooth\b|torch\b|flashlight\b|alarm\b|timer\b|band\b|chalu\b)""", RegexOption.IGNORE_CASE)
+        Regex("""\s+aur\s+(?=call\b|dial\b|text\b|message\b|sms\b|whatsapp\b|open\b|kholo\b|set\b|remind\b|yaad\b|turn\b|enable\b|disable\b|play\b|chalao\b|navigate\b|close\b|search\b|find\b|check\b|read\b|volume\b|awaaz\b|wifi\b|bluetooth\b|torch\b|flashlight\b|alarm\b|timer\b|increase\b|decrease\b|mute\b|pause\b|resume\b|band\b|chalu\b|karo\b)""", RegexOption.IGNORE_CASE)
     )
 
     fun looksLikeChain(speech: String): Boolean = split(speech)?.size?.let { it > 1 } == true
