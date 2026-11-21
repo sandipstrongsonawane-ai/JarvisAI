@@ -173,6 +173,42 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun stopsChainWhenActionRequiresManualContactSelection() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "Opening WhatsApp for a voice call. Select the contact in the app, sir."
+        }.execute(
+            listOf(
+                AssistantCommand("app_call", target = "WhatsApp", message = "voice"),
+                AssistantCommand("open_app", target = "Chrome")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("Select the contact in the app"))
+    }
+
+    @Test
+    fun stopsChainWhenMessageNeedsManualSend() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "WhatsApp opened with a prepared message for Rahul. Tap Send to send it; delivery is not verified."
+        }.execute(
+            listOf(
+                AssistantCommand("whatsapp_message", target = "Rahul", message = "Hello"),
+                AssistantCommand("open_app", target = "Chrome")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("Tap Send to send it"))
+    }
+
+    @Test
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
