@@ -48,6 +48,14 @@ class MultiActionPlannerTest {
     }
 
     @Test
+    fun rejectsUnexpectedFieldsAndUnsafeUrlSchemes() {
+        val extraField = """{"steps":[{"action":"open_app","target":"Chrome","admin":true},{"action":"web_search","target":"weather"}]}"""
+        val unsafeUrl = """{"steps":[{"action":"open_url","target":"intent://settings"},{"action":"read_screen"}]}"""
+        assertFalse(planner.parsePlan(extraField).ok)
+        assertFalse(planner.parsePlan(unsafeUrl).ok)
+    }
+
+    @Test
     fun rejectsTooManyStepsAndMalformedJson() {
         val tooMany = """{"steps":[{"action":"read_screen"},{"action":"screenshot"},{"action":"briefing"},{"action":"recall"},{"action":"debrief"},{"action":"read_screen"}]}"""
         assertFalse(planner.parsePlan(tooMany).ok)
