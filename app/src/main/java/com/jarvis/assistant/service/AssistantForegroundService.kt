@@ -15,6 +15,8 @@ import com.jarvis.assistant.R
 import com.jarvis.assistant.brain.BrainState
 import com.jarvis.assistant.brain.OfflineBrain
 import com.jarvis.assistant.executor.CommandExecutor
+import com.jarvis.assistant.executor.MultiStepExecutor
+import com.jarvis.assistant.executor.MultiActionPlanner
 import com.jarvis.assistant.executor.RiskConfirmGate
 import com.jarvis.assistant.network.PcBridgeServer
 import com.jarvis.assistant.util.FileFinder
@@ -908,6 +910,21 @@ class AssistantForegroundService : Service() {
         fileCommandReplyIfAsked(speech)?.let {
             offlineBrain.recordInteraction()
             return it to false
+        }
+
+        // Explicit multi-action requests are planned locally and fully validated before
+        // the first device action. Unsupported/sensitive plans fail closed; no partial plan runs.
+        val multiActionPlanner = MultiActionPlanner(ollama)
+        if (multiActionPlanner.looksLikeMultiActionRequest(speech)) {
+            val plan = multiActionPlanner.plan(speech)
+            if (!plan.ok) {
+                return "I couldn't safely build that action sequence. ${plan.error ?: "Please say the steps more clearly."}" to false
+            }
+            val report = MultiStepExecutor(this) { step ->
+                executeAssistantCommand(step)
+            }.execute(plan.steps)
+            offlineBrain.recordInteraction()
+            return report.summary to false
         }
 
         val offlineReply = try {
