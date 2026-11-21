@@ -206,7 +206,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
     private fun sendFileText(combined: String) {
         addBubble("Reading file with local Jarvis…", isUser = false)
         if (bound) {
-            service?.submitText(combined)
+            service?.submitChatText(combined)
         } else {
             addBubble("Service not ready — file was not sent. Please try again.", isUser = false)
         }
