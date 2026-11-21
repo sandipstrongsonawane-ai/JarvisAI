@@ -356,9 +356,7 @@ class OfflineBrain(
                 .ifBlank { text }
             return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", task))
         }
-        if (com.jarvis.assistant.util.CommandChainSplitter.looksLikeChain(text) &&
-            containsAny(cmd, "and then", " then ", " phir ", "after that", " aur ")
-        ) {
+        if (com.jarvis.assistant.util.CommandChainSplitter.looksLikeChain(text)) {
             return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", text))
         }
 
