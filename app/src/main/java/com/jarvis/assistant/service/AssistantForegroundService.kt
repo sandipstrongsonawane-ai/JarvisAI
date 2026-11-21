@@ -572,9 +572,9 @@ class AssistantForegroundService : Service() {
             }
             // Return directly to the always-on wake detector after TTS.
             // Do not open a one-shot SpeechRecognizer here: it owns AudioRecord and
-            // prevents OpenWakeWord from hearing the wake phrase while it is pending.
+            // prevents Voicute from hearing the wake phrase while it is pending.
             if (!externalMicSessionActive) {
-                android.util.Log.i("JarvisService", "Reply complete; returning directly to OpenWakeWord standby")
+                android.util.Log.i("JarvisService", "Reply complete; returning directly to Voicute standby")
                 resumeWakeSoon(500L)
             }
         }
