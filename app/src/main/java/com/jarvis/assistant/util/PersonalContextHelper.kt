@@ -151,26 +151,46 @@ class PersonalContextHelper(private val context: Context) {
 
     fun runAgentTask(task: String, runStep: (String) -> String): String {
         val t = task.trim()
-        if (t.isBlank()) return "What should I handle, sir?"
+        if (t.isBlank()) return "What should I handle?"
         val parts = CommandChainSplitter.split(t) ?: listOf(t)
-        if (parts.size == 1) {
-            val one = runStep(parts[0])
-            return if (one.isNotBlank()) one else "Done, sir."
+        if (parts.size > MAX_AGENT_STEPS) {
+            return "This request has ${parts.size} actions. I can safely run up to $MAX_AGENT_STEPS actions at a time."
         }
+
         val out = mutableListOf<String>()
         for ((i, step) in parts.withIndex()) {
-            try {
-                val r = runStep(step).trim()
-                if (r.isNotBlank()) out += "Step ${i + 1}: $r"
+            val result = try {
+                runStep(step).trim()
             } catch (e: Exception) {
-                out += "Step ${i + 1} failed: ${e.message}"
+                "Action failed: ${e.message ?: "unknown error"}"
+            }
+            if (result.isBlank()) {
+                out += "Step ${i + 1} failed: no result returned."
+                break
+            }
+            out += "Step ${i + 1}: $result"
+            if (isActionFailure(result)) {
+                out += "Stopped here; later actions were not run."
                 break
             }
         }
-        return buildString {
-            append("Agent ran ${parts.size} steps. ")
-            append(out.joinToString(" "))
-        }.trim()
+        val completed = out.count { it.startsWith("Step ") && " failed:" !in it }
+        return "Jarvis handled $completed of ${parts.size} requested action(s). " + out.joinToString(" ")
+    }
+
+    private fun isActionFailure(result: String): Boolean {
+        val value = result.lowercase()
+        return listOf(
+            "couldn't", "could not", "can't ", "cannot", "failed", "unable",
+            "not found", "not installed", "permission", "denied", "error:",
+            "i didn't understand", "don't understand", "which application",
+            "which app", "what should i", "what should", "no action was completed",
+            "not completed", "couldn't understand"
+        ).any(value::contains)
+    }
+
+    companion object {
+        private const val MAX_AGENT_STEPS = 5
     }
 
     private fun resolveContactDigits(nameQuery: String): List<String> {
