@@ -129,6 +129,12 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun rejectsUnsupportedTorchChainInsteadOfReturningPartialSteps() {
+        assertNull(executor().parseOfflineChain("torch on and then send a message to Rahul"))
+        assertNull(executor().parseOfflineChain("torch on and then increase volume"))
+    }
+
+    @Test
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
