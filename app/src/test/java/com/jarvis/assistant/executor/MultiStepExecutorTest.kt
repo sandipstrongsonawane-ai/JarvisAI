@@ -245,6 +245,24 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun stopsChainWhenTimerDurationIsInvalid() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "Timer duration must be greater than zero."
+        }.execute(
+            listOf(
+                AssistantCommand("set_timer", target = "0"),
+                AssistantCommand("open_app", target = "Chrome")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("greater than zero"))
+    }
+
+    @Test
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
