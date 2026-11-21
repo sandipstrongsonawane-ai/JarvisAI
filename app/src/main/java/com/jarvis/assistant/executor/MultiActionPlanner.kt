@@ -82,7 +82,9 @@ User request: ${speech.take(MAX_REQUEST_CHARS)}
 
     private fun extractJson(raw: String): String? {
         val trimmed = raw.trim()
-        val fenced = Regex("(?s)\u0060\u0060\u0060(?:json)?\\s*(\\{.*?\\})\\s*\u0060\u0060\u0060", RegexOption.IGNORE_CASE)
+        val fence = 96.toChar().toString().repeat(3)
+        val fencedPattern = "(?s)" + Regex.escape(fence) + "(?:json)?\\\\s*(\\\\{.*?\\\\})\\\\s*" + Regex.escape(fence)
+        val fenced = Regex(fencedPattern, RegexOption.IGNORE_CASE)
             .find(trimmed)?.groupValues?.get(1)
         if (fenced != null) return fenced
         val start = trimmed.indexOf('{')
