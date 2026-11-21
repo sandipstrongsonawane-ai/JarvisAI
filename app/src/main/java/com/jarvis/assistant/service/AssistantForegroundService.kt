@@ -867,6 +867,48 @@ class AssistantForegroundService : Service() {
         return voiceAuth.verify(sample)
     }
 
+    private fun dailyTaskReply(speech: String): String? {
+        val text = speech.trim()
+        val lower = text.lowercase()
+        val manager = com.jarvis.assistant.util.TaskListManager(this)
+
+        val addMatch = Regex(
+            "^(?:add task|task add|add a task|task jodo|kaam add karo)\\s*[:,-]?\\s*(.+)$",
+            RegexOption.IGNORE_CASE
+        ).find(text)
+        if (addMatch != null) {
+            val title = addMatch.groupValues[1].trim()
+            val task = manager.add(title) ?: return "Task ka naam batao, phir main add kar dunga."
+            return if (task.title.equals(title, true)) "Task added: ${task.title}." else "Ye task pehle se pending hai: ${task.title}."
+        }
+
+        if (lower in setOf("my tasks", "show tasks", "list tasks", "pending tasks", "mere tasks", "mere pending tasks", "tasks dikhao", "kaam dikhao")) {
+            val pending = manager.pending()
+            if (pending.isEmpty()) return "Abhi koi pending task nahi hai."
+            return "Pending tasks: " + pending.take(10).mapIndexed { index, task -> "${index + 1}. ${task.title}" }.joinToString("; ")
+        }
+
+        val completeMatch = Regex(
+            "^(?:complete task|task complete|task done|mark task done|kaam complete karo)\\s*[:,-]?\\s*(.+)$",
+            RegexOption.IGNORE_CASE
+        ).find(text)
+        if (completeMatch != null) {
+            val reference = completeMatch.groupValues[1].trim()
+            val result = manager.complete(reference)
+            return when {
+                result.task != null -> "Completed: ${result.task.title}."
+                result.ambiguous -> "Ek se zyada tasks match hue. Task number se batao, jaise: complete task 1."
+                else -> "Matching pending task nahi mila. My tasks bolo to list dekh sakte ho."
+            }
+        }
+
+        if (lower in setOf("clear completed tasks", "delete completed tasks", "completed tasks saaf karo")) {
+            val removed = manager.clearCompleted()
+            return "Completed tasks mein se ${removed} remove kiye."
+        }
+        return null
+    }
+
     private suspend fun processSpeech(speech: String, requireVoiceAuth: Boolean = true): Pair<String, Boolean> {
 
         // Authenticate before confirmation, cancellation, routing, or any action execution.
@@ -895,6 +937,12 @@ class AssistantForegroundService : Service() {
                 }
                 else -> RiskConfirmGate.cancel() // New request cancels the previous pending action.
             }
+        }
+
+        // Daily Life Manager task commands stay fully on-device; no LLM or network call.
+        dailyTaskReply(speech)?.let {
+            offlineBrain.recordInteraction()
+            return it to false
         }
 
         // Explicit memory commands are handled locally and never sent to a model.
