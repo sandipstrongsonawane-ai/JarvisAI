@@ -51,4 +51,23 @@ class RiskConfirmGateTest {
         assertTrue(prompt.contains("Rahul"))
         assertTrue(prompt.contains("I am on my way"))
     }
+    @Test
+    fun agentTaskWithExternalActionRequiresOneUpfrontConfirmation() {
+        val command = AssistantCommand(
+            "agent_task",
+            target = "send WhatsApp message to Rahul and then open Maps"
+        )
+        assertTrue(RiskConfirmGate.isRisky(command))
+        assertTrue(RiskConfirmGate.promptFor(command).contains("send WhatsApp message"))
+    }
+
+    @Test
+    fun harmlessAgentTaskDoesNotRequireConfirmation() {
+        assertFalse(
+            RiskConfirmGate.isRisky(
+                AssistantCommand("agent_task", target = "open Chrome and then open Maps")
+            )
+        )
+    }
+
 }
