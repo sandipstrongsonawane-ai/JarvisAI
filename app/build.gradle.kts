@@ -257,7 +257,7 @@ val downloadVoicuteWakeAssets by tasks.registering {
         assetsDir.mkdirs()
         fun gitBlobSha1(file: java.io.File): String {
             val digest = MessageDigest.getInstance("SHA-1")
-            digest.update("blob ${file.length()}\\u0000".toByteArray(Charsets.UTF_8))
+            digest.update("blob ${file.length()}\u0000".toByteArray(Charsets.UTF_8))
             file.inputStream().use { input ->
                 val buffer = ByteArray(64 * 1024)
                 while (true) {
@@ -288,7 +288,7 @@ val downloadVoicuteWakeAssets by tasks.registering {
         fetchPinned("melspectrogram.onnx", 1087958L, "a3a60354eebe5fa4c7c9534851e4cb0bd7b0d06c")
         fetchPinned("heyjarvis_r1.onnx", 130572L, "d5cb71e1bde0513627576df668d66fddea557b64")
         val config = assetsDir.resolve("model_info.json")
-        check(config.exists() && config.readText().contains("\\\"Hey Jarvis\\\"")) {
+        check(config.exists() && config.readText().contains("Hey Jarvis")) {
             "Voicute model_info.json is missing or does not configure Hey Jarvis"
         }
     }
