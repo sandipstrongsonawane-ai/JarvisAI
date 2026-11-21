@@ -107,7 +107,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
             } else false
         }
 
-        addBubble("Jarvis online. Type anything — offline commands work here too.", isUser = false)
+        addBubble("Jarvis ready. Talk naturally, give a command, or ask me to remember something.", isUser = false)
 
         val intent = Intent(this, AssistantForegroundService::class.java)
         startForegroundService(intent)
