@@ -13,7 +13,9 @@ class TaskListManager(context: Context) {
         val id: Long,
         val title: String,
         val createdAt: Long,
-        val completedAt: Long? = null
+        val completedAt: Long? = null,
+        val dueAt: Long? = null,
+        val priority: String = "normal"
     ) {
         val isComplete: Boolean get() = completedAt != null
     }
@@ -23,8 +25,9 @@ class TaskListManager(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     @Synchronized
-    fun add(title: String): Task? {
+    fun add(title: String, dueAt: Long? = null, priority: String = "normal"): Task? {
         val clean = title.trim().replace(Regex("\\s+"), " ").take(MAX_TITLE_LENGTH)
+        val cleanPriority = priority.lowercase().takeIf { it in setOf("low", "normal", "high") } ?: "normal"
         if (clean.isBlank()) return null
         val current = all()
         if (current.any { !it.isComplete && it.title.equals(clean, ignoreCase = true) }) {
@@ -33,7 +36,9 @@ class TaskListManager(context: Context) {
         val task = Task(
             id = (current.maxOfOrNull { it.id } ?: 0L) + 1L,
             title = clean,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            dueAt = dueAt,
+            priority = cleanPriority
         )
         save(current + task)
         return task
@@ -80,7 +85,11 @@ class TaskListManager(context: Context) {
                 val title = item.optString("title").trim()
                 if (id <= 0L || title.isBlank()) return@mapNotNull null
                 val completed = item.optLong("completedAt", 0L).takeIf { it > 0L }
-                Task(id, title, item.optLong("createdAt", 0L), completed)
+                Task(
+                    id, title, item.optLong("createdAt", 0L), completed,
+                    item.optLong("dueAt", 0L).takeIf { it > 0L },
+                    item.optString("priority", "normal").lowercase().takeIf { it in setOf("low", "normal", "high") } ?: "normal"
+                )
             }
         } catch (_: Exception) {
             emptyList()
@@ -94,7 +103,9 @@ class TaskListManager(context: Context) {
                 .put("id", task.id)
                 .put("title", task.title)
                 .put("createdAt", task.createdAt)
-                .put("completedAt", task.completedAt ?: 0L))
+                .put("completedAt", task.completedAt ?: 0L)
+                .put("dueAt", task.dueAt ?: 0L)
+                .put("priority", task.priority))
         }
         prefs.edit().putString(KEY_TASKS, array.toString()).apply()
     }
