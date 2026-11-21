@@ -67,7 +67,7 @@ object RiskConfirmGate {
             "telegram", "uninstall", "delete", "remove", "set pin", "unlock"
         )
         return riskyVerbs.any { verb ->
-            Regex("""\\b${Regex.escape(verb)}\\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)
+            Regex("""\b${Regex.escape(verb)}\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)
         }
     }
 
