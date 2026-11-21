@@ -1,8 +1,6 @@
 package com.jarvis.assistant.util
 
 import android.content.Context
-import androidx.test.core.app.ApplicationProvider
-import com.jarvis.assistant.memory.PersistentMemory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
