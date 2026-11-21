@@ -281,6 +281,13 @@ class AssistantForegroundService : Service() {
                 ) && detector.isRunning()
             } catch (error: Throwable) {
                 android.util.Log.e("JarvisService", "Voicute wake startup failed", error)
+                // Match the native-initialization safety guard: clean up any partially
+                // initialized wake resources without allowing cleanup failure to kill the service.
+                try {
+                    detector.stop()
+                } catch (cleanupError: Throwable) {
+                    android.util.Log.w("JarvisService", "Voicute wake cleanup after startup failure also failed", cleanupError)
+                }
                 false
             }
             mainHandler.post {
