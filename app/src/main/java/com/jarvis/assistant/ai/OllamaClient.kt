@@ -46,7 +46,7 @@ class OllamaClient(
                 messages.put(
                     JSONObject()
                         .put("role", if (role == "assistant") "assistant" else "user")
-                        .put("content", text.take(MAX_MESSAGE_CHARS))
+                        .put("content", text.take(MAX_HISTORY_MESSAGE_CHARS))
                 )
             }
         }
