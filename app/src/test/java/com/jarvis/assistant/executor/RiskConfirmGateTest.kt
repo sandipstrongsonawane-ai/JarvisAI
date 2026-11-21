@@ -70,4 +70,18 @@ class RiskConfirmGateTest {
         )
     }
 
+
+    @Test
+    fun pendingRiskyCommandCanOnlyBeConsumedOnce() {
+        RiskConfirmGate.cancel()
+        val command = AssistantCommand("send_sms", target = "9876543210", message = "Test")
+        RiskConfirmGate.hold(command)
+
+        assertTrue(RiskConfirmGate.hasPending())
+        assertTrue(RiskConfirmGate.takeIfConfirm("yes") == command)
+        assertFalse(RiskConfirmGate.hasPending())
+        assertTrue(RiskConfirmGate.takeIfConfirm("yes") == null)
+    }
+
+
 }
