@@ -73,6 +73,14 @@ class EveningDebrief(private val context: Context) {
             }
         } catch (_: Exception) {}
 
+        try {
+            val pending = TaskListManager(context).pending()
+            if (pending.isNotEmpty()) {
+                val preview = pending.take(5).joinToString("; ") { it.title }
+                parts += "Pending tasks for tomorrow: $preview."
+            }
+        } catch (_: Exception) {}
+
         if (isQuietHours()) {
             parts += "Quiet hours are active. I will keep non-urgent alerts down."
         } else {
