@@ -26,7 +26,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.jarvis.assistant.R
-import com.jarvis.assistant.ai.JarvisLlmClient
 import com.jarvis.assistant.util.SettingsManager
 import com.jarvis.assistant.brain.BrainState
 import com.jarvis.assistant.service.AssistantForegroundService
@@ -195,35 +194,21 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
     }
 
     private fun sendImage(uri: Uri, mime: String, prompt: String) {
-        addBubble("Analyzing image…", isUser = false)
-        scope.launch {
-            val base64 = withContext(Dispatchers.IO) { readImageAsBase64(uri) }
-            if (base64 == null) {
-                addBubble("Couldn't read that image.", isUser = false)
-                return@launch
-            }
-            val result = withContext(Dispatchers.IO) {
-                JarvisLlmClient(apiKeyProvider = { SettingsManager(this@ChatActivity).getGroqApiKey() }).chatWithImage(prompt, base64, mime)
-            }
-            if (result.ok) {
-                addBubble(result.text, isUser = false)
-            } else {
-                addBubble("Image analysis failed: ${result.error}", isUser = false)
-            }
-        }
+        // Qwen3 1.7B is text-only. Never upload a selected image to a cloud provider.
+        addBubble(
+            "Image received. Local image understanding is not enabled in this build yet; " +
+                "I have not uploaded the image anywhere.",
+            isUser = false
+        )
+        clearAttachment()
     }
 
     private fun sendFileText(combined: String) {
-        addBubble("Reading file…", isUser = false)
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                JarvisLlmClient(apiKeyProvider = { SettingsManager(this@ChatActivity).getGroqApiKey() }).chat(combined)
-            }
-            if (result.ok) {
-                addBubble(result.text, isUser = false)
-            } else {
-                addBubble("Couldn't process the file: ${result.error}", isUser = false)
-            }
+        addBubble("Reading file with local Jarvis…", isUser = false)
+        if (bound) {
+            service?.submitText(combined)
+        } else {
+            addBubble("Service not ready — file was not sent. Please try again.", isUser = false)
         }
     }
 
@@ -391,7 +376,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
     override fun onTranscript(text: String) {}
 
     override fun onResponse(text: String, fromCloud: Boolean) {
-        val prefix = if (fromCloud) "" else "[OFFLINE] "
+        val prefix = if (fromCloud) "[CLOUD] " else "[LOCAL] "
         addBubble(prefix + text, isUser = false)
     }
 
