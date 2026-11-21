@@ -890,7 +890,7 @@ class AssistantForegroundService : Service() {
         // misread as a "check <contact>"-style command.
         fileCommandReplyIfAsked(speech)?.let {
             offlineBrain.recordInteraction()
-            return it to true
+            return it to false
         }
 
         val offlineReply = try {
@@ -940,7 +940,7 @@ class AssistantForegroundService : Service() {
 
     /**
      * If the user mentioned a filename (e.g. "upi_osint.py padho" or "fix errors in main.py"),
-     * finds it on shared storage, reads it, and hands it to the cloud LLM along with the
+     * finds it on shared storage, reads it, and hands it to local Ollama along with the
      * user's original phrasing. Returns null if no filename was mentioned so the normal
      * pipeline continues untouched.
      */
