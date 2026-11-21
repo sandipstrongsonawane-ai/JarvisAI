@@ -82,7 +82,12 @@ class TextToSpeechHelper(context: Context) {
                     stopAndroidSpeech()
                     val started = cloudTts.speak(cleaned)
                     if (!started && generation == speechGeneration.get()) {
-                        Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android female voice")
+                        Log.w(TAG, "ElevenLabs unavailable; falling back to installed Android TTS voice")
+                        speakAndroid(cleaned)
+                    }
+                } catch (e: Exception) {
+                    if (generation == speechGeneration.get()) {
+                        Log.w(TAG, "Cloud TTS failed; falling back to Android TTS: ${e.message}", e)
                         speakAndroid(cleaned)
                     }
                 } finally {
@@ -106,7 +111,7 @@ class TextToSpeechHelper(context: Context) {
         try {
             stopAndroidSpeech()
             if (!configureAndroidVoice(text)) {
-                Log.e(TAG, "No female Android voice is installed; refusing male/default voice fallback")
+                Log.e(TAG, "No compatible Android TTS language/voice is available; cannot speak")
                 return
             }
             val id = UUID.randomUUID().toString()
@@ -154,17 +159,34 @@ class TextToSpeechHelper(context: Context) {
                     .filter { it.locale.language.equals("en", ignoreCase = true) }
                     .maxByOrNull { it.quality }
 
-            if (femaleVoice == null) {
-                Log.w(TAG, "No female Android voice installed for locale=$locale; languageResult=$languageResult")
-                false
-            } else {
+            if (femaleVoice != null) {
                 tts.voice = femaleVoice
                 tts.setLanguage(femaleVoice.locale)
                 Log.i(TAG, "Selected female TTS voice=${femaleVoice.name} locale=${femaleVoice.locale}")
-                tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
-                tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
-                true
+            } else {
+                // Female-first is a preference, not a reason to leave the assistant silent.
+                // Keep Android's installed default voice and select a supported language.
+                Log.w(TAG, "No female Android voice installed for locale=$locale; using system default voice")
+                if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                    languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    val deviceLanguage = tts.setLanguage(Locale.getDefault())
+                    if (deviceLanguage == TextToSpeech.LANG_MISSING_DATA ||
+                        deviceLanguage == TextToSpeech.LANG_NOT_SUPPORTED
+                    ) {
+                        val englishLanguage = tts.setLanguage(Locale.US)
+                        if (englishLanguage == TextToSpeech.LANG_MISSING_DATA ||
+                            englishLanguage == TextToSpeech.LANG_NOT_SUPPORTED
+                        ) {
+                            Log.e(TAG, "Android TTS has no supported language installed")
+                            return false
+                        }
+                    }
+                }
             }
+            tts.setSpeechRate(settings.getVoiceSpeed().coerceIn(0.7f, 1.4f))
+            tts.setPitch(settings.getVoicePitch().coerceIn(0.8f, 1.2f))
+            true
         } catch (e: Exception) {
             Log.w(TAG, "configureAndroidVoice: ${e.message}", e)
             false
