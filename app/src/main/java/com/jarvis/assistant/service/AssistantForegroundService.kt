@@ -381,7 +381,7 @@ class AssistantForegroundService : Service() {
                     userMessage = trimmed,
                     history = history,
                     memoryContext = memory.buildMemoryContext(settings.getUserName()),
-                    emotionalGuidance = EmotionalIntelligence.guidanceFor(speech)
+                    emotionalGuidance = EmotionalIntelligence.guidanceFor(trimmed)
                 )
             } catch (error: Exception) {
                 android.util.Log.e("JarvisService", "Local attachment chat failed", error)
@@ -964,7 +964,8 @@ class AssistantForegroundService : Service() {
                 ollama.chat(
                     userMessage = speech,
                     history = history,
-                    memoryContext = memory.buildMemoryContext(settings.getUserName())
+                    memoryContext = memory.buildMemoryContext(settings.getUserName()),
+                    emotionalGuidance = EmotionalIntelligence.guidanceFor(speech)
                 )
             } catch (error: Exception) {
                 android.util.Log.e("JarvisService", "Local Ollama conversation failed", error)
