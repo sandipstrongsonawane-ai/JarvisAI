@@ -263,7 +263,7 @@ class AssistantForegroundService : Service() {
                                 try { detector.stop() } catch (_: Exception) {}
                                 try { com.jarvis.assistant.ui.HudController.listening() } catch (_: Exception) {}
                                 try { com.jarvis.assistant.ui.ActivationEdgeOverlay.show(this@AssistantForegroundService) } catch (_: Exception) {}
-                                startListeningCycle()
+                                startListeningCycle(acknowledgeWake = true)
                             }
                         }
                     },
@@ -444,7 +444,7 @@ class AssistantForegroundService : Service() {
         }, 2200L) // after reply TTS starts
     }
 
-    fun startListeningCycle() {
+    fun startListeningCycle(acknowledgeWake: Boolean = false) {
         if (externalMicSessionActive) {
             android.util.Log.i("JarvisService", "Listening cycle blocked: external microphone session active")
             return
@@ -550,8 +550,26 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // Wake phrase has completed; open one-shot command STT immediately.
-        beginStt(false)
+        // A wake-word activation gets a short spoken acknowledgement. Wait for TTS
+        // to finish before opening SpeechRecognizer so both engines never compete for mic.
+        if (acknowledgeWake) {
+            tts.speak("Ji Sagar, boliye.")
+            scope.launch {
+                val deadline = System.currentTimeMillis() + 3500L
+                while (listenCycleRunning && tts.isSpeaking() &&
+                    System.currentTimeMillis() < deadline
+                ) {
+                    delay(100L)
+                }
+                if (listenCycleRunning) {
+                    delay(200L) // let the final audio buffer leave the speaker
+                    if (listenCycleRunning) beginStt(false)
+                }
+            }
+        } else {
+            // Manual Listen remains immediate and does not add an acknowledgement.
+            beginStt(false)
+        }
     }
 
 
