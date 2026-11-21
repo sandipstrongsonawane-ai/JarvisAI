@@ -19,6 +19,18 @@ object CommandChainSplitter {
         Regex("""\s+aur\s+(?=call\b|dial\b|text\b|message\b|sms\b|whatsapp\b|open\b|kholo\b|set\b|remind\b|yaad\b|turn\b|enable\b|disable\b|play\b|chalao\b|navigate\b|close\b|search\b|find\b|check\b|read\b|volume\b|awaaz\b|wifi\b|bluetooth\b|torch\b|flashlight\b|alarm\b|timer\b|increase\b|decrease\b|mute\b|pause\b|resume\b|band\b|chalu\b|karo\b)""", RegexOption.IGNORE_CASE)
     )
 
+    private fun isInsideQuotedText(text: String, index: Int): Boolean {
+        var quoted = false
+        for (i in 0 until index.coerceAtMost(text.length)) {
+            when (text[i]) {
+                '"' -> quoted = !quoted
+                '“', '‘' -> quoted = true
+                '”', '’' -> quoted = false
+            }
+        }
+        return quoted
+    }
+
     fun looksLikeChain(speech: String): Boolean = split(speech)?.size?.let { it > 1 } == true
 
     fun split(speech: String): List<String>? {
@@ -29,7 +41,8 @@ object CommandChainSplitter {
         while (remaining.isNotBlank()) {
             var earliest: MatchResult? = null
             for (separator in separators) {
-                val candidate = separator.find(remaining) ?: continue
+                val candidate = separator.findAll(remaining)
+                    .firstOrNull { !isInsideQuotedText(remaining, it.range.first) } ?: continue
                 if (earliest == null || candidate.range.first < earliest!!.range.first) {
                     earliest = candidate
                 }
