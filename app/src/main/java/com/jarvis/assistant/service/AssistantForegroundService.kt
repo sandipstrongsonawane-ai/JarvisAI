@@ -37,6 +37,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import java.util.Calendar
 import com.jarvis.assistant.ai.JarvisLlmClient
+import com.jarvis.assistant.ai.OllamaClient
+import com.jarvis.assistant.util.ConversationContext
 
 /**
  * Always-alive foreground service. The on-device wake detector calls
@@ -55,6 +57,8 @@ class AssistantForegroundService : Service() {
     private lateinit var tts: TextToSpeechHelper
     private lateinit var executor: CommandExecutor
     private lateinit var gemini: GeminiClient
+    private lateinit var ollama: OllamaClient
+    private val conversationContext = ConversationContext()
     private lateinit var offlineBrain: OfflineBrain
     private lateinit var networkStatus: NetworkStatusManager
     private lateinit var weatherClient: WeatherClient
@@ -112,6 +116,7 @@ class AssistantForegroundService : Service() {
         try { callAnnouncer?.start() } catch (_: Exception) {}
         executor = CommandExecutor(this)
         gemini = GeminiClient(apiKeyProvider = { SettingsManager(this).getGeminiApiKey() })
+        ollama = OllamaClient()
         networkStatus = NetworkStatusManager(this)
         weatherClient = WeatherClient(SettingsManager(this).getOpenWeatherApiKey())
         locationHelper = LocationHelper(this)
@@ -591,6 +596,8 @@ class AssistantForegroundService : Service() {
 
         scope.launch {
             val (resultText, fromCloud) = processSpeech(speech, requireVoiceAuth)
+            conversationContext.addMessage(speech, isUserInput = true)
+            conversationContext.addMessage(resultText, isUserInput = false)
 
             listener?.onStateChanged(BrainState.SPEAKING)
             listener?.onResponse(resultText, fromCloud)
@@ -868,8 +875,11 @@ class AssistantForegroundService : Service() {
             }
         }
 
-        // Complex/multi-step requests continue through the same OfflineBrain -> Groq -> Gemini
-        // structured-command pipeline. Do not split into "Done" placeholders here.
+        // Explicit memory commands are handled locally and never sent to a model.
+        memoryReplyIfAsked(speech)?.let {
+            offlineBrain.recordInteraction()
+            return it to false
+        }
 
         weatherReplyIfAsked(speech)?.let {
             offlineBrain.recordInteraction()
@@ -900,39 +910,28 @@ class AssistantForegroundService : Service() {
             }
         } else if (offlineReply != null) {
             offlineReply to false
-        } else if (networkStatus.isOnline()) {
-            val groqClient = JarvisLlmClient(
-                apiKeyProvider = {
-                    SettingsManager(this).getGroqApiKey()
-                }
-            )
-            val groqCommand = try {
-                groqClient.getCommand(speech, buildJarvisContext(speech))
-            } catch (e: Exception) {
-                android.util.Log.e("JarvisService", "Groq command planning failed", e)
-                null
-            }
-            if (groqCommand != null) {
-                try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
-                try {
-                    executeAssistantCommand(groqCommand) to true
-                } catch (e: Exception) {
-                    android.util.Log.e("JarvisService", "Groq action execution failed", e)
-                    "The requested action could not be executed: ${e.message ?: "unknown error"}" to true
-                }
-            } else {
-                try {
-                    // Gemini is the structured-command fallback, using the same executor.
-                    val command = gemini.getCommand(speech)
-                    try { com.jarvis.assistant.ui.HudController.executing() } catch (_: Exception) {}
-                    executeAssistantCommand(command) to true
-                } catch (e: Exception) {
-                    android.util.Log.e("JarvisService", "Both cloud command planners failed", e)
-                    "I couldn't interpret or execute that request. Please try a clearer command." to true
-                }
-            }
         } else {
-            "I'm currently offline and lack a local protocol for that request, sir." to false
+            val settings = SettingsManager(this)
+            val memory = PersistentMemory(this)
+            val history = conversationContext.getRecentMessages(8).map { message ->
+                (if (message.isUserInput) "user" else "assistant") to message.text
+            }
+            val localResult = try {
+                ollama.chat(
+                    userMessage = speech,
+                    history = history,
+                    memoryContext = memory.buildMemoryContext(settings.getUserName())
+                )
+            } catch (error: Exception) {
+                android.util.Log.e("JarvisService", "Local Ollama conversation failed", error)
+                OllamaClient.Result(false, error = error.message ?: "Local AI request failed")
+            }
+            if (localResult.ok) {
+                localResult.text to false
+            } else {
+                android.util.Log.w("JarvisService", "Local AI unavailable: ${localResult.error}")
+                "My local AI brain is unavailable right now. ${localResult.error ?: "Start Ollama in Termux and try again."}" to false
+            }
         }
 
         offlineBrain.recordInteraction()
@@ -983,6 +982,55 @@ class AssistantForegroundService : Service() {
     }
 
     /** Phase 5 — "Live weather aur location". Returns null if the speech isn't a weather question. */
+    /**
+     * Explicit, user-directed memory controls. No automatic personal-data harvesting.
+     * Memory is stored only in the app's private on-device preferences.
+     */
+    private fun memoryReplyIfAsked(speech: String): String? {
+        val text = speech.trim()
+        val lower = text.lowercase()
+
+        val forgetAll = listOf(
+            "forget everything you remember about me",
+            "forget all my memories",
+            "clear my memory",
+            "delete my memories",
+            "sab kuch bhool jao",
+            "meri saari memory delete karo",
+            "meri sab baatein bhool jao"
+        ).any { lower.contains(it) }
+        if (forgetAll) {
+            PersistentMemory(this).clear()
+            return "The personal memories stored by Jarvis on this device have been cleared."
+        }
+
+        val recall = listOf(
+            "what do you remember about me",
+            "what do you know about me",
+            "meri kya kya baatein yaad hain",
+            "tumhe mere baare mein kya yaad hai",
+            "maine kya yaad rakhne ko kaha tha"
+        ).any { lower.contains(it) }
+        if (recall) {
+            val facts = PersistentMemory(this).getFacts(20)
+            return if (facts.isEmpty()) {
+                "Abhi maine tumhare baare mein koi personal fact save nahi kiya hai."
+            } else {
+                "Mujhe ye baatein yaad hain:\\n" + facts.joinToString("\\n") { "• $it" }
+            }
+        }
+
+        val prefixes = listOf(
+            "remember that ", "remember this ", "remember ",
+            "yaad rakhna ", "yaad rakh ", "isko yaad rakhna "
+        )
+        val prefix = prefixes.firstOrNull { lower.startsWith(it) } ?: return null
+        val fact = text.substring(prefix.length).trim().trimEnd('.', '!')
+        if (fact.isBlank()) return "Kya yaad rakhna hai? Baat batao."
+        PersistentMemory(this).rememberFact(fact)
+        return "Theek hai, maine ye baat sirf is device par save kar li: $fact"
+    }
+
     private suspend fun weatherReplyIfAsked(speech: String): String? {
         val lower = speech.lowercase()
         val isWeatherQuestion = listOf("weather", "temperature", "mausam", "kitni garmi", "kitni thand")
