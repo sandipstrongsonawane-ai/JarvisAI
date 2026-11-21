@@ -142,20 +142,7 @@ class MultiStepExecutor(
             )
         }
 
-        // flashlight then brightness-style: torch on and ...
-        if (lower.contains("torch") || lower.contains("flashlight")) {
-            val steps = mutableListOf<AssistantCommand>()
-            if (lower.contains("on") || lower.contains("chalu")) {
-                steps += AssistantCommand(action = ActionType.TOGGLE_SETTING.key, target = "torch_on")
-            } else if (lower.contains("off") || lower.contains("band")) {
-                steps += AssistantCommand(action = ActionType.TOGGLE_SETTING.key, target = "torch_off")
-            }
-            if (steps.isNotEmpty() && (lower.contains("and") || lower.contains("phir"))) {
-                return steps
-            }
-        }
-
-        return null
+        // Unsupported chains must fail closed; never return a partial action list.\n\n        return null
     }
 
     private fun isHardFail(out: String): Boolean {
