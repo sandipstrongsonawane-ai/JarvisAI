@@ -320,6 +320,7 @@ class AssistantForegroundService : Service() {
 
     private fun forceReleaseCommandMic() {
         try { stt.stopContinuous() } catch (_: Exception) {}
+        try { voicuteWake?.stop() } catch (_: Exception) {}
                         
         listenCycleRunning = false
         try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
@@ -354,7 +355,8 @@ class AssistantForegroundService : Service() {
         mainHandler.postDelayed({
             if (externalMicSessionActive) return@postDelayed
             if (listenCycleRunning) return@postDelayed
-                                
+
+            try { voicuteWake?.stop() } catch (_: Exception) {}
             try { stt.stopContinuous() } catch (_: Exception) {}
             listenCycleRunning = true
             lastListenCycleMs = System.currentTimeMillis()
@@ -417,6 +419,7 @@ class AssistantForegroundService : Service() {
             return
         }
         wakeStartGeneration++ // cancel any delayed standby start before taking command mic
+        try { voicuteWake?.stop() } catch (_: Exception) {}
         lastListenCycleMs = now
         listenCycleRunning = true
 
@@ -1002,7 +1005,10 @@ class AssistantForegroundService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         proactive?.stop()
         proactive = null
-                                stt.stopContinuous()
+        wakeStartGeneration++
+        wakeStartInProgress = false
+        try { voicuteWake?.release() } catch (_: Exception) {}
+        stt.stopContinuous()
         stt.destroy()
         tts.shutdown()
         if (pcBridge.isRunning) pcBridge.stop()
