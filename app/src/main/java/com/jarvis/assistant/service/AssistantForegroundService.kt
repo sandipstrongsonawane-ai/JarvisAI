@@ -43,10 +43,9 @@ import com.jarvis.assistant.util.ConversationContext
  * startListeningCycle() on wake, rather than this service polling continuously —
  * continuous SpeechRecognizer usage will drain battery fast and Android will kill it.
  *
- * Command routing is offline-first: OfflineBrain tries to answer locally (app
- * control, settings, time/date/battery, math, notes, small talk — all on-device).
- * Gemini is only ever contacted when the offline brain doesn't recognize the
- * command AND NetworkStatusManager confirms there's an actual internet path.
+ * Command routing is offline-first: OfflineBrain handles supported device actions.
+ * Natural conversation and text-file analysis use only the on-device Ollama service;
+ * there is no remote LLM fallback when the local model is unavailable.
  */
 class AssistantForegroundService : Service() {
 
