@@ -119,6 +119,7 @@ object RiskConfirmGate {
         }
     }
 
+    @Synchronized
     fun hold(cmd: AssistantCommand): String {
         val p = promptFor(cmd)
         pending = Pending(cmd, p, System.currentTimeMillis() + WINDOW_MS)
@@ -126,6 +127,7 @@ object RiskConfirmGate {
     }
 
     /** @return pending command if confirm and still valid */
+    @Synchronized
     fun takeIfConfirm(speech: String): AssistantCommand? {
         val p = pending ?: return null
         if (System.currentTimeMillis() > p.expiresAt) {
@@ -141,11 +143,19 @@ object RiskConfirmGate {
         return p.command
     }
 
+    @Synchronized
     fun cancel(): String {
         pending = null
         return "Cancelled."
     }
 
-    fun hasPending(): Boolean = pending != null &&
-        System.currentTimeMillis() <= (pending?.expiresAt ?: 0L)
+    @Synchronized
+    fun hasPending(): Boolean {
+        val current = pending ?: return false
+        if (System.currentTimeMillis() >= current.expiresAt) {
+            pending = null
+            return false
+        }
+        return true
+    }
 }
