@@ -27,6 +27,7 @@ class BriefingHelper(private val context: Context) {
         batteryLine()?.let { parts += it }
         networkLine()?.let { parts += it }
         calendarLine()?.let { parts += it }
+        taskLine()?.let { parts += it }
 
         if (includeWeather) {
             weatherLine()?.let { parts += it }
@@ -120,6 +121,19 @@ class BriefingHelper(private val context: Context) {
             }
             val cleaned = brief.trim().removePrefix("Next:").trim()
             "Next on calendar: $cleaned"
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun taskLine(): String? {
+        return try {
+            val pending = TaskListManager(context).pending()
+            if (pending.isEmpty()) return null
+            val preview = pending.take(3).joinToString("; ") { it.title }
+            val remaining = pending.size - minOf(pending.size, 3)
+            val suffix = if (remaining > 0) "; and $remaining more" else ""
+            "You have ${pending.size} pending task${if (pending.size == 1) "" else "s"}: $preview$suffix."
         } catch (_: Exception) {
             null
         }
