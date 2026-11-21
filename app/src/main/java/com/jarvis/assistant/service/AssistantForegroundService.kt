@@ -585,12 +585,12 @@ class AssistantForegroundService : Service() {
                 android.util.Log.w("JarvisService", "TTS completion timed out; stopping playback before listening")
                 tts.stop()
             }
-            // Return directly to the always-on wake detector after TTS.
-            // Do not open a one-shot SpeechRecognizer here: it owns AudioRecord and
-            // prevents Voicute from hearing the wake phrase while it is pending.
-            if (!externalMicSessionActive) {
-                android.util.Log.i("JarvisService", "Reply complete; returning directly to Voicute standby")
-                resumeWakeSoon(500L)
+            // Preserve the proven #456 post-reply follow-up window.
+            // Voicute remains the only standby wake engine; the one-shot STT
+            // follow-up closes on result/timeout/error and then re-arms Voicute.
+            if (!listenCycleRunning && !externalMicSessionActive) {
+                android.util.Log.i("JarvisService", "Reply complete; opening #456-style follow-up window")
+                startFollowUpListen()
             }
         }
     }
