@@ -159,7 +159,15 @@ class DetectionLogic {
             if (peak <= bg * 3f) { dbgFail = 2; return null; }
 
             // L3: cooldown
-            if ((now - lastTrig) < CD_MS) { dbgFail = 3; return null; }
+            if ((now - lastTrig) < CD_MS) {
+                // Do not accumulate candidate frames during cooldown. Otherwise a
+                // sustained keyword can trigger immediately when the cooldown expires.
+                cons = 0;
+                consWord = "";
+                consGap = 0;
+                dbgFail = 3;
+                return null;
+            }
 
             // L4a: burst cooldown
             if (now < blocked) { cons = 0; consWord = ""; dbgFail = 4; return null; }
