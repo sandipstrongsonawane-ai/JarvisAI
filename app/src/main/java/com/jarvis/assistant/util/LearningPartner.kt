@@ -140,15 +140,16 @@ internal class LearningProgressStore(context: Context) {
     fun progressSummary(): String {
         val topic = activeTopic().ifBlank { prefs.getString(KEY_LAST_TOPIC, "").orEmpty() }
         if (topic.isBlank()) return "Abhi koi learning progress save nahi hai. Bolo: Teach me [topic]."
-        val lessons = prefs.getInt(key("lessons"), 0)
-        val attempts = prefs.getInt(key("quiz_attempts"), 0)
-        val correct = prefs.getInt(key("correct_answers"), 0)
+        val lessons = prefs.getInt(key("lessons", topic), 0)
+        val attempts = prefs.getInt(key("quiz_attempts", topic), 0)
+        val correct = prefs.getInt(key("correct_answers", topic), 0)
         val accuracy = if (attempts == 0) 0 else (correct * 100 / attempts)
         return "Learning progress — $topic: $lessons lesson(s), $attempts quiz attempt(s), $correct correct ($accuracy%)."
     }
 
     private fun increment(name: String) { prefs.edit().putInt(name, prefs.getInt(name, 0) + 1).apply() }
-    private fun key(metric: String): String = "topic:${activeTopic().lowercase()}:$metric"
+    private fun key(metric: String, topic: String = activeTopic()): String =
+        "topic:${topic.lowercase()}:$metric"
 
     companion object {
         private const val KEY_ACTIVE_TOPIC = "active_topic"
