@@ -77,7 +77,7 @@ User request: ${speech.take(MAX_REQUEST_CHARS)}
         val verbs = listOf("open", "launch", "start", "turn", "switch", "set", "increase", "decrease",
             "play", "search", "show", "read", "screenshot", "check", "kholo", "chalu", "band",
             "on karo", "off karo", "bajao", "dikhao", "lagao")
-        return verbs.count { lower.contains(it) } >= 2
+        return verbs.sumOf { verb -> Regex(Regex.escape(verb)).findAll(lower).count() } >= 2
     }
 
     private fun extractJson(raw: String): String? {
