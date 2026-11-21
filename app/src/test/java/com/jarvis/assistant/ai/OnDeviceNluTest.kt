@@ -51,7 +51,7 @@ class OnDeviceNluTest {
     }
 
     @Test
-    fun leavesUnrecognizedMediaRequestUnclassifiedWhenQueryIsMissing() {
-        assertNull(nlu.classify("put on music"))
+    fun classifiesGenericMediaRequestWithoutForcingAnApp() {
+        assertEquals(AssistantCommand("play_media", "music"), nlu.classify("put on music"))
     }
 }
