@@ -62,6 +62,43 @@ class OfflineBrain(
             return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", text))
         }
 
+        // Daily Life Manager: deterministic, on-device task capture and tracking.
+        val taskManager = com.jarvis.assistant.util.TaskListManager(context)
+        val addTaskMatch = Regex("""^(?:please\\s+)?(?:add|create|remember)\\s+(?:a\\s+)?(?:new\\s+)?task(?:\\s*[:\\-]\\s*|\\s+)(.+)$""", RegexOption.IGNORE_CASE)
+            .find(text.trim())
+            ?: Regex("""^task\\s+add\\s+(.+)$""", RegexOption.IGNORE_CASE).find(text.trim())
+        if (addTaskMatch != null) {
+            val title = addTaskMatch.groupValues[1].trim()
+            val task = taskManager.add(title) ?: return "Please tell me what task to add."
+            return if (task.title.equals(title, true)) {
+                "Added to your task list: ${task.title}."
+            } else {
+                "That task is already on your pending list: ${task.title}."
+            }
+        }
+        if (containsAny(cmd, "my tasks", "show tasks", "list tasks", "pending tasks",
+                "to do list", "todo list", "task list", "mere tasks", "mere kaam") ||
+            cmd == "tasks" || cmd == "todo"
+        ) {
+            val pending = taskManager.pending()
+            if (pending.isEmpty()) return "Your task list is clear. No pending tasks."
+            val shown = pending.take(10).mapIndexed { index, task -> "${index + 1}. ${task.title}" }
+            val extra = if (pending.size > shown.size) " And ${pending.size - shown.size} more." else ""
+            return "Your pending tasks: " + shown.joinToString(". ") + extra
+        }
+        val completeTaskMatch = sequenceOf(
+            Regex("""^(?:please\\s+)?complete\\s+(?:the\\s+)?task\\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^task\\s+(?:complete|done|finish)\\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(?:mark|finish)\\s+task\\s+(.+?)\\s+(?:as\\s+)?done$""", RegexOption.IGNORE_CASE)
+        ).mapNotNull { it.find(text.trim()) }.firstOrNull()
+        if (completeTaskMatch != null) {
+            val reference = completeTaskMatch.groupValues[1].trim()
+            val result = taskManager.complete(reference)
+            if (result.task != null) return "Marked as complete: ${result.task.title}."
+            if (result.ambiguous) return "More than one task matches. Say its list number or full task name."
+            return "I couldn't find that pending task. Say 'my tasks' to see your list."
+        }
+
         // A request to open navigation without a destination should open Maps, not route to the word "kholo".
         if (containsAny(cmd, "open navigation", "navigation kholo", "start navigation", "maps navigation")) {
             return executor.execute(AssistantCommand("open_app", "Maps"))
