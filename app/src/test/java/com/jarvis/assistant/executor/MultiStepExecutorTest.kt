@@ -209,6 +209,42 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun stopsChainWhenSpecialAccessRetryIsPending() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "Jarvis needs Accessibility access. Enable Jarvis in the settings page; I'll retry the action when you return."
+        }.execute(
+            listOf(
+                AssistantCommand("read_screen"),
+                AssistantCommand("open_app", target = "Chrome")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("retry the action when you return"))
+    }
+
+    @Test
+    fun stopsChainWhenRuntimePermissionRetryIsPending() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "Jarvis needs permission to complete this action. Please grant it from the permission prompt/notification; I'll retry automatically."
+        }.execute(
+            listOf(
+                AssistantCommand("send_sms", target = "Rahul", message = "Hello"),
+                AssistantCommand("open_app", target = "Chrome")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("retry automatically"))
+    }
+
+    @Test
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
