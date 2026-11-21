@@ -64,16 +64,17 @@ class OfflineBrain(
 
         // Daily Life Manager: deterministic, on-device task capture and tracking.
         val taskManager = com.jarvis.assistant.util.TaskListManager(context)
-        val addTaskMatch = Regex("""^(?:please\\s+)?(?:add|create|remember)\\s+(?:a\\s+)?(?:new\\s+)?task(?:\\s*[:\\-]\\s*|\\s+)(.+)$""", RegexOption.IGNORE_CASE)
+        val addTaskMatch = Regex("""^(?:please\s+)?(?:add|create|remember)\s+(?:a\s+)?(?:new\s+)?task(?:\s*[:\-]\s*|\s+)(.+)$""", RegexOption.IGNORE_CASE)
             .find(text.trim())
-            ?: Regex("""^task\\s+add\\s+(.+)$""", RegexOption.IGNORE_CASE).find(text.trim())
+            ?: Regex("""^task\s+add\s+(.+)$""", RegexOption.IGNORE_CASE).find(text.trim())
         if (addTaskMatch != null) {
             val title = addTaskMatch.groupValues[1].trim()
+            val alreadyExists = taskManager.pending().any { it.title.equals(title, true) }
             val task = taskManager.add(title) ?: return "Please tell me what task to add."
-            return if (task.title.equals(title, true)) {
-                "Added to your task list: ${task.title}."
-            } else {
+            return if (alreadyExists) {
                 "That task is already on your pending list: ${task.title}."
+            } else {
+                "Added to your task list: ${task.title}."
             }
         }
         if (containsAny(cmd, "my tasks", "show tasks", "list tasks", "pending tasks",
@@ -87,9 +88,9 @@ class OfflineBrain(
             return "Your pending tasks: " + shown.joinToString(". ") + extra
         }
         val completeTaskMatch = sequenceOf(
-            Regex("""^(?:please\\s+)?complete\\s+(?:the\\s+)?task\\s+(.+)$""", RegexOption.IGNORE_CASE),
-            Regex("""^task\\s+(?:complete|done|finish)\\s+(.+)$""", RegexOption.IGNORE_CASE),
-            Regex("""^(?:mark|finish)\\s+task\\s+(.+?)\\s+(?:as\\s+)?done$""", RegexOption.IGNORE_CASE)
+            Regex("""^(?:please\s+)?complete\s+(?:the\s+)?task\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^task\s+(?:complete|done|finish)\s+(.+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(?:mark|finish)\s+task\s+(.+?)\s+(?:as\s+)?done$""", RegexOption.IGNORE_CASE)
         ).mapNotNull { it.find(text.trim()) }.firstOrNull()
         if (completeTaskMatch != null) {
             val reference = completeTaskMatch.groupValues[1].trim()
