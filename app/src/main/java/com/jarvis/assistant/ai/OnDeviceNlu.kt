@@ -15,7 +15,10 @@ class OnDeviceNlu(@Suppress("unused") private val context: Context) {
         if (t.length < 3) return null
         val c = t.lowercase()
 
-        if (c.contains("put on") && (c.contains("song") || c.contains("music") || c.contains("track"))) {
+        val mediaAppMentioned = listOf("spotify", "youtube music", "youtube").any { it in c }
+        if (c.contains("put on") &&
+            (c.contains("song") || c.contains("music") || c.contains("track") || mediaAppMentioned)
+        ) {
             var q = t.replace(Regex("(?i).*put on\\s+"), "")
             val app = when {
                 "spotify" in c -> {
@@ -35,10 +38,15 @@ class OnDeviceNlu(@Suppress("unused") private val context: Context) {
             q = q.trim()
             if (q.isNotBlank()) return AssistantCommand("play_media", q, app)
         }
-        if (c.startsWith("can you open") || c.startsWith("could you open") || c.startsWith("please open")) {
-            val name = t.replace(Regex("(?i)^(can you|could you|please)\\s+open\\s+"), "").trim()
+
+        val openRequest = Regex("(?i)^(can you|could you|please)\\s+open(?:\\s+(.*))?$")
+            .matchEntire(t)
+        if (openRequest != null) {
+            val name = openRequest.groupValues.getOrNull(2).orEmpty().trim()
             if (name.isNotBlank()) return AssistantCommand("open_app", name)
+            return null
         }
+
         if (c.startsWith("can you search") || c.startsWith("look up")) {
             val q = t.replace(Regex("(?i)^(can you search(\\s+for)?|look up)\\s*"), "").trim()
             if (q.isNotBlank()) return AssistantCommand("web_search", q)
