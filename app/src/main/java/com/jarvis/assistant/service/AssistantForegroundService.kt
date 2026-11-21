@@ -912,6 +912,13 @@ class AssistantForegroundService : Service() {
             return it to false
         }
 
+        // Personal Learning Partner is opt-in and uses only the on-device Ollama model.
+        // It stores topic progress locally; ordinary conversation is left untouched.
+        LearningPartner(this, ollama).handle(speech)?.let {
+            offlineBrain.recordInteraction()
+            return it to false
+        }
+
         // Explicit multi-action requests are planned locally and fully validated before
         // the first device action. Unsupported/sensitive plans fail closed; no partial plan runs.
         val multiActionPlanner = MultiActionPlanner(ollama)
