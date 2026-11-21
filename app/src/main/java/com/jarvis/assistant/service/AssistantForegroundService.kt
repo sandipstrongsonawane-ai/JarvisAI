@@ -80,6 +80,7 @@ class AssistantForegroundService : Service() {
     private var wakeRetryPosted = false
     private var wakeStartGeneration = 0
     @Volatile private var wakeStartInProgress = false
+    private var wakeCpuLock: android.os.PowerManager.WakeLock? = null
     private val wakeRetryRunnable = Runnable {
         wakeRetryPosted = false
         if (!externalMicSessionActive && !listenCycleRunning && !wakeStartInProgress) startWakeWordListening()
@@ -147,6 +148,7 @@ class AssistantForegroundService : Service() {
                 wakeStartGeneration++
                 listenCycleRunning = false
                 releaseAllMics()
+                releaseWakeCpuLock()
                 try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
                 android.util.Log.i("JarvisService", "Wake microphone paused for an external capture session")
                 return START_STICKY
@@ -215,6 +217,7 @@ class AssistantForegroundService : Service() {
         val sm = com.jarvis.assistant.util.SettingsManager(this)
         if (!sm.getBackgroundListen() && !sm.getWakeWordEnabled()) {
             try { voicuteWake?.stop() } catch (_: Exception) {}
+            releaseWakeCpuLock()
             try { com.jarvis.assistant.ui.HudController.idle() } catch (_: Exception) {}
             android.util.Log.i("JarvisService", "Wake off in settings")
             return
@@ -226,9 +229,11 @@ class AssistantForegroundService : Service() {
         ) {
             android.util.Log.w("JarvisService", "Voicute wake start skipped: microphone permission missing")
             try { voicuteWake?.stop() } catch (_: Exception) {}
+            releaseWakeCpuLock()
             return
         }
 
+        holdWakeCpuLock()
         val generation = ++wakeStartGeneration
         try { stt.stopContinuous() } catch (_: Exception) {}
         try { voicuteWake?.stop() } catch (_: Exception) {}
@@ -295,6 +300,33 @@ class AssistantForegroundService : Service() {
                     scheduleWakeResumeRetry()
                 }
             }
+        }
+    }
+
+    private fun holdWakeCpuLock() {
+        try {
+            val power = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            val lock = wakeCpuLock ?: power.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                "$packageName:VoicuteWake"
+            ).also {
+                it.setReferenceCounted(false)
+                wakeCpuLock = it
+            }
+            if (!lock.isHeld) {
+                lock.acquire()
+                android.util.Log.i("JarvisService", "Partial CPU wake lock acquired for always-on Voicute inference")
+            }
+        } catch (error: Exception) {
+            android.util.Log.e("JarvisService", "Could not acquire CPU wake lock; Android may suspend standby inference", error)
+        }
+    }
+
+    private fun releaseWakeCpuLock() {
+        try {
+            wakeCpuLock?.let { if (it.isHeld) it.release() }
+        } catch (error: Exception) {
+            android.util.Log.w("JarvisService", "CPU wake lock release failed", error)
         }
     }
 
@@ -1009,6 +1041,7 @@ class AssistantForegroundService : Service() {
         wakeStartGeneration++
         wakeStartInProgress = false
         try { voicuteWake?.release() } catch (_: Exception) {}
+        releaseWakeCpuLock()
         stt.stopContinuous()
         stt.destroy()
         tts.shutdown()
