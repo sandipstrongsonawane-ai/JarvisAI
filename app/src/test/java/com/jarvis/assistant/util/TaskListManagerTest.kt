@@ -53,6 +53,21 @@ class TaskListManagerTest {
     }
 
     @Test
+    fun dueDateAndPriorityPersistAcrossManagerInstances() {
+        val dueAt = 1_800_000_000_000L
+        tasks.add("Submit report", dueAt = dueAt, priority = "high")
+        val saved = TaskListManager(context).pending().single()
+        assertEquals(dueAt, saved.dueAt)
+        assertEquals("high", saved.priority)
+    }
+
+    @Test
+    fun invalidPriorityFallsBackToNormal() {
+        tasks.add("Read book", priority = "urgent")
+        assertEquals("normal", tasks.pending().single().priority)
+    }
+
+    @Test
     fun clearCompletedKeepsPendingTasks() {
         tasks.add("Task one")
         tasks.add("Task two")
