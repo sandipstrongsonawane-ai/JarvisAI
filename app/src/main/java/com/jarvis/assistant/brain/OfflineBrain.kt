@@ -45,6 +45,23 @@ class OfflineBrain(
         // Add to conversation history
         conversationContext.addMessage(text, isUserInput = true)
 
+        // Route supported deterministic chains through the same multi-step executor.
+        // This includes WhatsApp message chains; the executor's risk gate asks for confirmation.
+        val offlineSteps = com.jarvis.assistant.executor.MultiStepExecutor(context) { step ->
+            executor.execute(step)
+        }.parseOfflineChain(text)
+        if (!offlineSteps.isNullOrEmpty()) {
+            return executor.execute(
+                com.jarvis.assistant.model.AssistantCommand("multi_step", steps = offlineSteps)
+            )
+        }
+
+        // Catch a complete spoken chain before any single-action keyword handler can
+        // execute only its first clause and silently drop the remaining actions.
+        if (com.jarvis.assistant.util.CommandChainSplitter.looksLikeChain(text)) {
+            return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", text))
+        }
+
         // A request to open navigation without a destination should open Maps, not route to the word "kholo".
         if (containsAny(cmd, "open navigation", "navigation kholo", "start navigation", "maps navigation")) {
             return executor.execute(AssistantCommand("open_app", "Maps"))
@@ -63,23 +80,6 @@ class OfflineBrain(
             return executor.execute(
                 AssistantCommand("navigate", navigationDestination, "driving")
             )
-        }
-
-        // Route supported deterministic chains through the same multi-step executor.
-        // This includes WhatsApp message chains; the executor's risk gate asks for confirmation.
-        val offlineSteps = com.jarvis.assistant.executor.MultiStepExecutor(context) { step ->
-            executor.execute(step)
-        }.parseOfflineChain(text)
-        if (!offlineSteps.isNullOrEmpty()) {
-            return executor.execute(
-                com.jarvis.assistant.model.AssistantCommand("multi_step", steps = offlineSteps)
-            )
-        }
-
-        // Catch a complete spoken chain before any single-action keyword handler can
-        // execute only its first clause and silently drop the remaining actions.
-        if (com.jarvis.assistant.util.CommandChainSplitter.looksLikeChain(text)) {
-            return executor.execute(com.jarvis.assistant.model.AssistantCommand("agent_task", text))
         }
 
         if (containsAny(cmd, "who is this", "identify person", "identify face", "who is that", "chehra pehchano")) {
