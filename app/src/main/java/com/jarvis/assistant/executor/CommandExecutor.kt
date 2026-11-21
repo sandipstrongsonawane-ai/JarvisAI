@@ -390,9 +390,8 @@ class CommandExecutor(private val context: Context) {
             // Re-enter offline brain for each step (open app, call, etc.)
             try {
                 val brain = com.jarvis.assistant.brain.OfflineBrain(context, this) { _ -> "" }
-                brain.handle(step) ?: execute(
-                    com.jarvis.assistant.model.AssistantCommand("web_search", step)
-                )
+                brain.handle(step)
+                    ?: "I couldn't understand action: $step. No action was run."
             } catch (e: Exception) {
                 "Failed: ${e.message}"
             }
