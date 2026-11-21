@@ -388,7 +388,7 @@ class AssistantForegroundService : Service() {
             listener?.onStateChanged(BrainState.SPEAKING)
             listener?.onResponse(reply, false)
             tts.speak(
-                if (reply.contains("\\u0060\\u0060\\u0060") || reply.length > 400)
+                if (reply.contains(96.toChar().toString().repeat(3)) || reply.length > 400)
                     "I've displayed the full details on screen for your review."
                 else reply
             )
