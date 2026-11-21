@@ -68,6 +68,37 @@ class TaskListManagerTest {
     }
 
     @Test
+    fun pendingTaskCanBeDeletedByIndex() {
+        tasks.add("Call office")
+        tasks.add("Buy milk")
+
+        val result = tasks.delete("1")
+
+        assertEquals("Call office", result.task?.title)
+        assertEquals(listOf("Buy milk"), tasks.pending().map { it.title })
+    }
+
+    @Test
+    fun ambiguousDeleteDoesNotRemoveAnyTask() {
+        tasks.add("Call office")
+        tasks.add("Call electrician")
+
+        val result = tasks.delete("Call")
+
+        assertTrue(result.ambiguous)
+        assertEquals(2, tasks.pending().size)
+    }
+
+    @Test
+    fun deleteDoesNotRemoveCompletedTask() {
+        tasks.add("Finished report")
+        tasks.complete("1")
+
+        assertNull(tasks.delete("1").task)
+        assertEquals(1, tasks.completed().size)
+    }
+
+    @Test
     fun clearCompletedKeepsPendingTasks() {
         tasks.add("Task one")
         tasks.add("Task two")
