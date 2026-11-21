@@ -352,11 +352,47 @@ class AssistantForegroundService : Service() {
         mainHandler.postDelayed(wakeRetryRunnable, delayMs)
     }
 
-    /** Text chat — same offline-first pipeline as voice. */
+    /** Text chat — command-aware path shared with voice input. */
     fun submitText(text: String) {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
         handleUserSpeech(trimmed, requireVoiceAuth = false)
+    }
+
+    /** Direct local-AI path for already-read attachments; skips filename command detection. */
+    fun submitChatText(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        listener?.onTranscript(trimmed)
+        listener?.onStateChanged(BrainState.THINKING)
+        scope.launch {
+            val settings = SettingsManager(this@AssistantForegroundService)
+            val memory = PersistentMemory(this@AssistantForegroundService)
+            val history = conversationContext.getRecentMessages(8).map { message ->
+                (if (message.isUserInput) "user" else "assistant") to message.text
+            }
+            conversationContext.addMessage(trimmed, isUserInput = true)
+            val result = try {
+                ollama.chat(
+                    userMessage = trimmed,
+                    history = history,
+                    memoryContext = memory.buildMemoryContext(settings.getUserName())
+                )
+            } catch (error: Exception) {
+                android.util.Log.e("JarvisService", "Local attachment chat failed", error)
+                OllamaClient.Result(false, error = error.message ?: "Local AI request failed")
+            }
+            val reply = if (result.ok) result.text else
+                "Local Jarvis could not process this attachment. ${result.error ?: "Check that Ollama is running in Termux."}"
+            conversationContext.addMessage(reply, isUserInput = false)
+            listener?.onStateChanged(BrainState.SPEAKING)
+            listener?.onResponse(reply, false)
+            tts.speak(
+                if (reply.contains("\\u0060\\u0060\\u0060") || reply.length > 400)
+                    "I've displayed the full details on screen for your review."
+                else reply
+            )
+        }
     }
 
 
