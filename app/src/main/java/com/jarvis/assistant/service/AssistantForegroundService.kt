@@ -12,7 +12,6 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.jarvis.assistant.R
-import com.jarvis.assistant.ai.GeminiClient
 import com.jarvis.assistant.brain.BrainState
 import com.jarvis.assistant.brain.OfflineBrain
 import com.jarvis.assistant.executor.CommandExecutor
@@ -36,7 +35,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import java.util.Calendar
-import com.jarvis.assistant.ai.JarvisLlmClient
 import com.jarvis.assistant.ai.OllamaClient
 import com.jarvis.assistant.util.ConversationContext
 
@@ -56,7 +54,6 @@ class AssistantForegroundService : Service() {
     private var callAnnouncer: com.jarvis.assistant.util.IncomingCallAnnouncer? = null
     private lateinit var tts: TextToSpeechHelper
     private lateinit var executor: CommandExecutor
-    private lateinit var gemini: GeminiClient
     private lateinit var ollama: OllamaClient
     private val conversationContext = ConversationContext()
     private lateinit var offlineBrain: OfflineBrain
@@ -115,7 +112,6 @@ class AssistantForegroundService : Service() {
         callAnnouncer = com.jarvis.assistant.util.IncomingCallAnnouncer(this) { tts }
         try { callAnnouncer?.start() } catch (_: Exception) {}
         executor = CommandExecutor(this)
-        gemini = GeminiClient(apiKeyProvider = { SettingsManager(this).getGeminiApiKey() })
         ollama = OllamaClient()
         networkStatus = NetworkStatusManager(this)
         weatherClient = WeatherClient(SettingsManager(this).getOpenWeatherApiKey())
@@ -637,20 +633,6 @@ class AssistantForegroundService : Service() {
      * fit the pure offline/cloud split) → file lookup (if a filename was mentioned) →
      * offline brain → Gemini cloud fallback.
      */
-    
-    /** MCU-style context: long-term memory + current utterance for smarter cloud replies. */
-    private fun buildJarvisContext(currentSpeech: String): String {
-        val mem = PersistentMemory(this).buildMemoryContext(
-            SettingsManager(this).getUserName()
-        )
-        return buildString {
-            append(mem)
-            append("\n\nCurrent user utterance: ")
-            append(currentSpeech)
-            append("\nRespond as JARVIS: anticipate needs, be precise, stay in character.")
-        }
-    }
-
     
     private suspend fun buildMorningBriefing(): String {
         val sb = StringBuilder()
