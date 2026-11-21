@@ -876,6 +876,7 @@ private fun setAlarm(target: String?): String {
 
     private fun setTimer(target: String?): String {
         val seconds = target?.toIntOrNull() ?: return "How long should the timer be, sir?"
+        if (seconds <= 0) return "Timer duration must be greater than zero."
         // 1) System clock if available
         val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
             putExtra(AlarmClock.EXTRA_LENGTH, seconds)
