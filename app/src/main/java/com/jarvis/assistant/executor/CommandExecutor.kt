@@ -672,7 +672,7 @@ class CommandExecutor(private val context: Context) {
         val smsNumber = number.filter { it.isDigit() || it == '+' }
         if (smsNumber.count { it.isDigit() } < 8) return "Number for $name looks invalid, sir."
         SmsManager.getDefault().sendTextMessage(smsNumber, null, message, null, null)
-        return "Message sent to $name, sir."
+        return "SMS send request submitted for $name. Delivery is not verified."
     }
 
     private fun resolvePhoneNumber(value: String): String? {
