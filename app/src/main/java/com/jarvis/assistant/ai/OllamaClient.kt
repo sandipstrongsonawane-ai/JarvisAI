@@ -28,7 +28,8 @@ class OllamaClient(
     suspend fun chat(
         userMessage: String,
         history: List<Pair<String, String>> = emptyList(),
-        memoryContext: String = ""
+        memoryContext: String = "",
+        emotionalGuidance: String = ""
     ): Result = withContext(Dispatchers.IO) {
         if (userMessage.isBlank()) return@withContext Result(false, error = "Empty message")
 
@@ -37,6 +38,10 @@ class OllamaClient(
             if (memoryContext.isNotBlank()) {
                 append("\n\nPERSONAL MEMORY (user-controlled, on this device):\n")
                 append(memoryContext.take(MAX_MEMORY_CHARS))
+            }
+            if (emotionalGuidance.isNotBlank()) {
+                append("\n\nCONVERSATIONAL CARE GUIDANCE:\n")
+                append(emotionalGuidance.take(MAX_EMOTIONAL_GUIDANCE_CHARS))
             }
         }
         val messages = JSONArray()
@@ -106,6 +111,7 @@ class OllamaClient(
         private const val MAX_HISTORY_MESSAGE_CHARS = 1200
         private const val MAX_USER_MESSAGE_CHARS = 8000
         private const val MAX_MEMORY_CHARS = 4000
+        private const val MAX_EMOTIONAL_GUIDANCE_CHARS = 600
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         val SYSTEM_PROMPT = """
