@@ -36,6 +36,8 @@ User request: ${speech.take(MAX_REQUEST_CHARS)}
         val root = try { JSONObject(jsonText) } catch (_: Exception) {
             return PlanResult(false, error = "Planner returned malformed JSON.")
         }
+        val rootKeys = root.keys().asSequence().toSet()
+        if (rootKeys != setOf("steps")) return PlanResult(false, error = "Unexpected planner response fields.")
         val array = root.optJSONArray("steps") ?: return PlanResult(false, error = "Missing steps array.")
         if (array.length() !in MIN_STEPS..MAX_STEPS) return PlanResult(false, error = "Planner must return 2 to 5 actions.")
 
@@ -58,12 +60,22 @@ User request: ${speech.take(MAX_REQUEST_CHARS)}
             val item = try { array.getJSONObject(index) } catch (_: Exception) {
                 return PlanResult(false, error = "Action ${index + 1} is not an object.")
             }
+            val itemKeys = item.keys().asSequence().toSet()
+            if (!itemKeys.all { it == "action" || it == "target" || it == "message" }) {
+                return PlanResult(false, error = "Action ${index + 1} contains unexpected fields.")
+            }
             val action = item.optString("action").trim().lowercase()
-            val target = item.optString("target").takeUnless { it.isBlank() || it == "null" }
-            val message = item.optString("message").takeUnless { it.isBlank() || it == "null" }
+            val target = item.optString("target").trim().takeUnless { it.isBlank() || it == "null" }
+            val message = item.optString("message").trim().takeUnless { it.isBlank() || it == "null" }
+            if ((target?.length ?: 0) > MAX_ARGUMENT_CHARS || (message?.length ?: 0) > MAX_ARGUMENT_CHARS) {
+                return PlanResult(false, error = "Action ${index + 1} argument is too long.")
+            }
             if (action !in allowed) return PlanResult(false, error = "Action ${index + 1} is not allowed: $action")
             if (action in requiresTarget && target.isNullOrBlank()) return PlanResult(false, error = "Action ${index + 1} is missing its target.")
-            if (item.has("steps") || item.has("extra")) return PlanResult(false, error = "Nested or extra action data is not accepted.")
+            if (action == ActionType.OPEN_URL.key && target?.startsWith("https://", true) != true &&
+                target?.startsWith("http://", true) != true) {
+                return PlanResult(false, error = "Action ${index + 1} must use an HTTP or HTTPS URL.")
+            }
             steps += AssistantCommand(action = action, target = target, message = message)
         }
         return PlanResult(true, steps = steps)
@@ -96,5 +108,6 @@ User request: ${speech.take(MAX_REQUEST_CHARS)}
         const val MAX_STEPS = 5
         private const val MIN_STEPS = 2
         private const val MAX_REQUEST_CHARS = 1200
+        private const val MAX_ARGUMENT_CHARS = 300
     }
 }
