@@ -50,8 +50,8 @@ class PersistentMemory(context: Context) {
         val clean = fact.trim()
         if (clean.isBlank()) return
         appendFact(clean)
-        // Index under a stable key for quick recall of "last fact"
-        remember("last_fact", clean)
+        // Index the latest fact without appending a second, synthetic timeline entry.
+        prefs.edit().putString("last_fact", clean).apply()
     }
 
     fun getFacts(limit: Int = 30): List<String> {
