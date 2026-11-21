@@ -68,6 +68,23 @@ class TaskListManager(context: Context) {
     }
 
     @Synchronized
+    fun delete(reference: String): CompletionResult {
+        val open = pending()
+        if (open.isEmpty()) return CompletionResult()
+        val query = reference.trim()
+        val byIndex = query.toIntOrNull()?.let { index ->
+            if (index in 1..open.size) listOf(open[index - 1]) else emptyList()
+        }
+        val matches = byIndex ?: open.filter { it.title.equals(query, true) }.ifEmpty {
+            open.filter { it.title.contains(query, true) || query.contains(it.title, true) }
+        }
+        if (matches.size != 1) return CompletionResult(ambiguous = matches.size > 1)
+        val target = matches.single()
+        save(all().filterNot { it.id == target.id })
+        return CompletionResult(task = target)
+    }
+
+    @Synchronized
     fun clearCompleted(): Int {
         val current = all()
         val remaining = current.filterNot { it.isComplete }
