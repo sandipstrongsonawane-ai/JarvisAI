@@ -45,4 +45,17 @@ class CommandChainSplitterTest {
         )
     }
 
+    @Test
+    fun doesNotSplitConnectorsInsideQuotedMessageBody() {
+        assertEquals(
+            listOf(
+                """send message to Rahul saying "call me and text me later"""",
+                "open Chrome"
+            ),
+            CommandChainSplitter.split(
+                """send message to Rahul saying "call me and text me later" and then open Chrome"""
+            )
+        )
+    }
+
 }
