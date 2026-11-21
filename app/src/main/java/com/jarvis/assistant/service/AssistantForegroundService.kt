@@ -321,6 +321,7 @@ class AssistantForegroundService : Service() {
     private fun forceReleaseCommandMic() {
         try { stt.stopContinuous() } catch (_: Exception) {}
         try { voicuteWake?.stop() } catch (_: Exception) {}
+        try { voicuteWake?.stop() } catch (_: Exception) {}
                         
         listenCycleRunning = false
         try { com.jarvis.assistant.ui.ActivationEdgeOverlay.hide() } catch (_: Exception) {}
