@@ -584,8 +584,8 @@ class SettingsActivity : AppCompatActivity() {
     private fun runEnrollment() {
         toast("Voice enrollment starting. Background wake will pause briefly while samples are recorded.")
         scope.launch {
-            pauseWakeMicForEnrollment()
             try {
+                pauseWakeMicForEnrollment()
                 // Let the foreground wake detector stop and release AudioRecord before captureSample().
                 kotlinx.coroutines.delay(900L)
                 val samples = mutableListOf<ShortArray>()
@@ -626,13 +626,15 @@ class SettingsActivity : AppCompatActivity() {
                 toast("Neural voice enrolled and voice lock enabled.")
                 tts.speak("Voice enrollment complete. Voice lock is now enabled.")
             } finally {
-                // Always return mic ownership to the background wake service, including failures.
-                kotlinx.coroutines.delay(700L)
-                try {
-                    resumeWakeMicAfterEnrollment()
-                } catch (e: Exception) {
-                    android.util.Log.e("JarvisEnrollment", "Failed to resume background wake microphone", e)
-                    toast("Enrollment ended, but wake listening could not resume. Reopen Jarvis to restart it.")
+                // Cancellation must not skip the microphone hand-back.
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    kotlinx.coroutines.delay(700L)
+                    try {
+                        resumeWakeMicAfterEnrollment()
+                    } catch (e: Exception) {
+                        android.util.Log.e("JarvisEnrollment", "Failed to resume background wake microphone", e)
+                        toast("Enrollment ended, but wake listening could not resume. Reopen Jarvis to restart it.")
+                    }
                 }
             }
         }
