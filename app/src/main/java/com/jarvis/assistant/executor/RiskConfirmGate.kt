@@ -130,7 +130,7 @@ object RiskConfirmGate {
     @Synchronized
     fun takeIfConfirm(speech: String): AssistantCommand? {
         val p = pending ?: return null
-        if (System.currentTimeMillis() > p.expiresAt) {
+        if (System.currentTimeMillis() >= p.expiresAt) {
             pending = null
             return null
         }
