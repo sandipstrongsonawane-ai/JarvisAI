@@ -951,10 +951,6 @@ class AssistantForegroundService : Service() {
             return "I need storage access to read files, sir. Please grant \"All files access\" " +
                 "for Jarvis in Settings, then try again."
         }
-        if (!networkStatus.isOnline()) {
-            return "I found that you mean a file, sir, but reading it needs the cloud brain and I'm offline right now."
-        }
-
         val file = withContext(Dispatchers.IO) { FileFinder.findFile(fileName) }
             ?: return "I couldn't find a file named \"$fileName\" on this device, sir."
 
@@ -968,16 +964,24 @@ class AssistantForegroundService : Service() {
             append("Respond to their request about this file.")
         }
 
+        val settings = SettingsManager(this)
         val result = try {
-            JarvisLlmClient(apiKeyProvider = { SettingsManager(this).getGroqApiKey() }).chat(combined)
-        } catch (e: Exception) {
+            ollama.chat(
+                userMessage = combined,
+                history = conversationContext.getRecentMessages(8).map { message ->
+                    (if (message.isUserInput) "user" else "assistant") to message.text
+                },
+                memoryContext = PersistentMemory(this).buildMemoryContext(settings.getUserName())
+            )
+        } catch (error: Exception) {
+            android.util.Log.e("JarvisService", "Local file analysis failed", error)
             null
         }
 
         return if (result != null && result.ok && result.text.isNotBlank()) {
             result.text
         } else {
-            "I found the file but couldn't process it right now, sir."
+            "I found the file, but local Ollama could not process it. ${result?.error ?: "Check that Ollama is running in Termux."}"
         }
     }
 
