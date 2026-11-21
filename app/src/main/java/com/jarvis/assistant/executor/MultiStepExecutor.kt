@@ -161,7 +161,11 @@ class MultiStepExecutor(
             "permission", "denied", "i didn't understand", "unknown", "unknown setting", "error",
             "which application", "which app", "no number",
             // A held risky action is awaiting user confirmation, not a completed step.
-            "say confirm or cancel", "confirmation required"
+            "say confirm or cancel", "confirmation required",
+            // These responses hand control to the user; the next chain step must wait.
+            "select the contact in the app", "select a contact in the app",
+            "choose a contact in the app", "tap send to send it",
+            "delivery is not verified"
         )
         return keys.any { l.contains(it) }
     }
