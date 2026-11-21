@@ -169,7 +169,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
                 etInput.setText("")
                 addBubble((if (text.isBlank()) "[Image] $name" else "[Image] $name\n$text"), isUser = true)
                 clearAttachment()
-                sendImage(uri, mime ?: "image/jpeg", text)
+                sendImage()
             }
             isTextLike(mime, name) -> {
                 val content = readTextFile(uri)
@@ -193,7 +193,7 @@ class ChatActivity : AppCompatActivity(), AssistantForegroundService.AssistantLi
         }
     }
 
-    private fun sendImage(uri: Uri, mime: String, prompt: String) {
+    private fun sendImage() {
         // Qwen3 1.7B is text-only. Never upload a selected image to a cloud provider.
         addBubble(
             "Image received. Local image understanding is not enabled in this build yet; " +
