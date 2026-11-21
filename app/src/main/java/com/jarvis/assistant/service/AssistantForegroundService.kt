@@ -39,6 +39,7 @@ import kotlin.coroutines.resume
 import java.util.Calendar
 import com.jarvis.assistant.ai.OllamaClient
 import com.jarvis.assistant.util.ConversationContext
+import com.jarvis.assistant.util.LearningPartner
 
 /**
  * Always-alive foreground service. The on-device wake detector calls
