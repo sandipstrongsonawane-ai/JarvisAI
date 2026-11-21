@@ -53,6 +53,25 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun stopsAndReportsUnverifiedWhenStepReturnsBlank() {
+        var calls = 0
+        val report = executor {
+            calls++
+            if (calls == 1) "Opened Chrome" else "   "
+        }.execute(
+            listOf(
+                AssistantCommand("open_app", target = "Chrome"),
+                AssistantCommand("open_app", target = "Maps")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(2, calls)
+        assertTrue(report.summary.contains("No result returned at step 2 of 2"))
+        assertTrue(report.summary.contains("completion is unverified"))
+    }
+
+    @Test
     fun treatsCannotLaunchResponseAsHardFailure() {
         var calls = 0
         val report = executor {
