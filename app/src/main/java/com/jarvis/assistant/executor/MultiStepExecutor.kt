@@ -142,7 +142,8 @@ class MultiStepExecutor(
             )
         }
 
-        // Unsupported chains must fail closed; never return a partial action list.\n\n        return null
+        // Unsupported chains must fail closed; never return a partial action list.
+        return null
     }
 
     private fun isHardFail(out: String): Boolean {
