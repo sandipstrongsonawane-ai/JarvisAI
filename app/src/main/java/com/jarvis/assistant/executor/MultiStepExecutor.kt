@@ -52,6 +52,13 @@ class MultiStepExecutor(
                 }
                 val out = runOne(step).trim()
                 results += out
+                if (out.isBlank()) {
+                    return Report(
+                        ok = false,
+                        summary = "No result returned at step $n of $total ($label). Stopped; completion is unverified.",
+                        stepResults = results
+                    )
+                }
                 if (isHardFail(out)) {
                     return Report(
                         ok = false,
