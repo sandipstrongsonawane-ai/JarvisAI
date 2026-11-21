@@ -135,6 +135,25 @@ class MultiStepExecutorTest {
     }
 
     @Test
+    fun stopsChainWhenRiskyStepIsWaitingForConfirmation() {
+        var calls = 0
+        val report = executor {
+            calls++
+            "Send the message to Rahul? Say confirm or cancel."
+        }.execute(
+            listOf(
+                AssistantCommand("whatsapp_message", target = "Rahul", message = "Hello"),
+                AssistantCommand("open_app", target = "Chrome")
+            ),
+            paceMs = 0
+        )
+        assertFalse(report.ok)
+        assertEquals(1, calls)
+        assertTrue(report.summary.contains("step 1 of 2"))
+        assertTrue(report.summary.contains("Say confirm or cancel"))
+    }
+
+    @Test
     fun rejectsUnrecognizedSingleActionAsChain() {
         assertNull(executor().parseOfflineChain("what time is it"))
     }
