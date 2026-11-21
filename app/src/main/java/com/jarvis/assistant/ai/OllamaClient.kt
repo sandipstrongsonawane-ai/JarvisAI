@@ -50,7 +50,7 @@ class OllamaClient(
                 )
             }
         }
-        messages.put(JSONObject().put("role", "user").put("content", userMessage.take(MAX_MESSAGE_CHARS)))
+        messages.put(JSONObject().put("role", "user").put("content", userMessage.take(MAX_USER_MESSAGE_CHARS)))
 
         val payload = JSONObject()
             .put("model", model)
@@ -103,7 +103,8 @@ class OllamaClient(
         const val DEFAULT_ENDPOINT = "http://127.0.0.1:11434/api/chat"
         const val DEFAULT_MODEL = "qwen3:1.7b"
         private const val MAX_HISTORY_MESSAGES = 8
-        private const val MAX_MESSAGE_CHARS = 2000
+        private const val MAX_HISTORY_MESSAGE_CHARS = 1200
+        private const val MAX_USER_MESSAGE_CHARS = 8000
         private const val MAX_MEMORY_CHARS = 4000
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
