@@ -58,6 +58,7 @@ class LearningPartnerTest {
 
         assertEquals("", store.activeTopic())
         assertEquals("", store.pendingQuestion())
-        assertTrue(store.progressSummary().contains("no active learning topic"))
+        assertTrue(store.progressSummary().contains("Math"))
+        assertTrue(store.progressSummary().contains("1 lesson(s)"))
     }
 }
