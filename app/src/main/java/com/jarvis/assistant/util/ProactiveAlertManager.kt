@@ -21,6 +21,9 @@ class ProactiveAlertManager(
     private var batteryReceiver: BroadcastReceiver? = null
     private var lastBatteryAlertLevel = -1
     private val alertedEventKeys = mutableSetOf<String>()
+    private val taskAlertPrefs = context.getSharedPreferences("jarvis_task_alerts", Context.MODE_PRIVATE)
+    private val alertedTaskKeys = taskAlertPrefs.getStringSet("alerted_task_keys", emptySet())
+        ?.toMutableSet() ?: mutableSetOf()
 
     fun start() {
         if (!settings.getProactiveAlertsEnabled()) {
@@ -30,6 +33,7 @@ class ProactiveAlertManager(
         registerBatteryReceiver()
         // Immediate calendar scan
         checkCalendar()
+        checkTasks()
         Log.i(TAG, "Proactive alerts armed")
     }
 
@@ -49,6 +53,36 @@ class ProactiveAlertManager(
         if (!settings.getProactiveAlertsEnabled()) return
         checkBatteryLevel()
         checkCalendar()
+        checkTasks()
+    }
+
+    /** Speak once when a pending task is due within 30 minutes or already overdue. */
+    private fun checkTasks() {
+        val now = System.currentTimeMillis()
+        val dueTasks = TaskDueAlertPolicy.dueForAlert(
+            TaskListManager(context).pending(), now, TASK_ALERT_WINDOW_MS
+        )
+        for (task in dueTasks) {
+            val dueAt = task.dueAt ?: continue
+            val key = "${task.id}:$dueAt"
+            if (!alertedTaskKeys.add(key)) continue
+            // Persist before speaking so service restarts do not repeat the same alert.
+            if (alertedTaskKeys.size > MAX_TASK_ALERT_KEYS) {
+                alertedTaskKeys.clear()
+                alertedTaskKeys.add(key)
+            }
+            taskAlertPrefs.edit().putStringSet("alerted_task_keys", alertedTaskKeys.toSet()).apply()
+            val overdue = dueAt < now
+            val urgency = when (task.priority) {
+                "high" -> "High-priority task. "
+                "low" -> "Low-priority task. "
+                else -> ""
+            }
+            val timing = if (overdue) "is overdue" else "is due soon"
+            val message = "Sir, $urgency${task.title} $timing."
+            Log.i(TAG, "Task alert: $message")
+            onAlert(message)
+        }
     }
 
     private fun registerBatteryReceiver() {
@@ -156,5 +190,7 @@ class ProactiveAlertManager(
 
     companion object {
         private const val TAG = "ProactiveAlerts"
+        private const val TASK_ALERT_WINDOW_MS = 30 * 60_000L
+        private const val MAX_TASK_ALERT_KEYS = 200
     }
 }
