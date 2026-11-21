@@ -168,11 +168,12 @@ class PersonalContextHelper(private val context: Context) {
                 out += "Step ${i + 1} failed: no result returned."
                 break
             }
-            out += "Step ${i + 1}: $result"
             if (isActionFailure(result)) {
+                out += "Step ${i + 1} failed: $result"
                 out += "Stopped here; later actions were not run."
                 break
             }
+            out += "Step ${i + 1}: $result"
         }
         val completed = out.count { it.startsWith("Step ") && " failed:" !in it }
         return "Jarvis handled $completed of ${parts.size} requested action(s). " + out.joinToString(" ")
