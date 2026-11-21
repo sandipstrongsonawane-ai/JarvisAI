@@ -123,7 +123,9 @@ internal class LearningProgressStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("jarvis_learning_progress", Context.MODE_PRIVATE)
 
     fun activeTopic(): String = prefs.getString(KEY_ACTIVE_TOPIC, "").orEmpty()
-    fun startTopic(topic: String) { prefs.edit().putString(KEY_ACTIVE_TOPIC, topic.trim()).apply() }
+    fun startTopic(topic: String) {
+        prefs.edit().putString(KEY_ACTIVE_TOPIC, topic.trim()).putString(KEY_LAST_TOPIC, topic.trim()).apply()
+    }
     fun clearActiveSession() { prefs.edit().remove(KEY_ACTIVE_TOPIC).remove(KEY_PENDING_QUESTION).apply() }
     fun savePendingQuestion(question: String) { prefs.edit().putString(KEY_PENDING_QUESTION, question).apply() }
     fun pendingQuestion(): String = prefs.getString(KEY_PENDING_QUESTION, "").orEmpty()
@@ -136,8 +138,8 @@ internal class LearningProgressStore(context: Context) {
     }
 
     fun progressSummary(): String {
-        val topic = activeTopic()
-        if (topic.isBlank()) return "Abhi koi active learning topic nahi hai. Bolo: Teach me [topic]."
+        val topic = activeTopic().ifBlank { prefs.getString(KEY_LAST_TOPIC, "").orEmpty() }
+        if (topic.isBlank()) return "Abhi koi learning progress save nahi hai. Bolo: Teach me [topic]."
         val lessons = prefs.getInt(key("lessons"), 0)
         val attempts = prefs.getInt(key("quiz_attempts"), 0)
         val correct = prefs.getInt(key("correct_answers"), 0)
@@ -150,6 +152,7 @@ internal class LearningProgressStore(context: Context) {
 
     companion object {
         private const val KEY_ACTIVE_TOPIC = "active_topic"
+        private const val KEY_LAST_TOPIC = "last_topic"
         private const val KEY_PENDING_QUESTION = "pending_question"
     }
 }
